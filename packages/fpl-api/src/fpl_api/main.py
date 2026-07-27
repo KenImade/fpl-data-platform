@@ -13,6 +13,7 @@ def health() -> dict[str, str]:
     data: dict[str, str] = {
         "status": "ok",
         "version": VERSION,
+        "environment": os.environ.get("ENV", "development"),
         "sha": os.environ.get("GIT_SHA", "development"),
         "timestamp": datetime.now(UTC).isoformat(),
     }

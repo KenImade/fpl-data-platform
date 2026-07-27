@@ -1,6 +1,6 @@
 FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim AS build
 WORKDIR /app
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml README.md uv.lock ./
 COPY packages/ packages/
 RUN uv sync --frozen --package fpl-api --no-dev
 
@@ -12,4 +12,4 @@ USER app
 ENV PATH="/app/.venv/bin:$PATH"
 ARG GIT_SHA
 ENV GIT_SHA=$GIT_SHA
-CMD ["uvicorn", "fpl-api.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "fpl_api.main:app", "--host", "0.0.0.0", "--port", "8080"]

@@ -1,6 +1,10 @@
 name: CI
 on: [push, pull_request]
 
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -12,3 +16,33 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run mypy
       - run: uv run pytest -q
+
+  deploy:
+    needs: check
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl deploy --remote-only \
+            --build-arg GIT_SHA=${{ github.sha }} \
+            --wait-timeout 300
+
+      - name: Smoke test
+        run: |
+          for i in {1..10}; do
+            body=$(curl -fsS https://YOUR-APP.fly.dev/health) && break
+            echo "attempt $i failed, retrying"; sleep 5
+          done
+          echo "$body"
+          echo "$body" | grep -q '"sha":"${{ github.sha }}"' \
+            || { echo "::error::deployed SHA does not match ${{ github.sha }}"; exit 1; }
