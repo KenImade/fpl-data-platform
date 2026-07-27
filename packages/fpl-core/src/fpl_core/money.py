@@ -19,3 +19,15 @@ def to_millions(p: Price) -> float:
 
 def format(p: Price) -> str:
     return f"£{p / 10:.1f}m"
+
+
+def sell_price(purchase: Price, current: Price) -> Price:
+    """Sell price given what was paid and the current market price.
+
+    Profit is halved and rounded down to the nearest 0.1m. Losses are
+    returned in full.
+    """
+    if current <= purchase:
+        return current
+    profit = current - purchase
+    return Price(purchase + profit // 2)

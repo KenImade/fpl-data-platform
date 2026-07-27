@@ -47,6 +47,7 @@ files = [
 
 [dependency-groups]
 dev = [
+    "httpx2>=2.9.1",
     "mypy>=2.3.0",
     "pre-commit>=4.6.1",
     "pytest>=9.1.1",
