@@ -39,8 +39,10 @@ jobs:
 
       - name: Smoke test
         run: |
+          APP=$(grep '^app =' fly.toml | cut -d'"' -f2)
+
           for i in {1..10}; do
-            body=$(curl -fsS https://YOUR-APP.fly.dev/health) && break
+            body=$(curl -fsS https://${APP}.fly.dev/health) && break
             echo "attempt $i failed, retrying"; sleep 5
           done
           echo "$body"
