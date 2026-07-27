@@ -1,0 +1,45 @@
+ruleset_id: "2026-27"
+season: "2026-27"
+
+appearance:
+  played: 1
+  played_60: 2
+
+goals:
+  GKP: 10
+  DEF: 6
+  MID: 5
+  FWD: 4
+
+assists: 3
+
+clean_sheet:
+  GKP: 4
+  DEF: 4
+  MID: 1
+  FWD: 0
+
+goals_conceded:
+  per_n_conceded: 2
+  points: -1
+
+saves:
+  per_n_saves: 3
+  points: 1
+
+penalties:
+  saved: 5
+  missed: -2
+
+cards:
+  yellow: -1
+  red: -3
+
+own_goal: -2
+
+defensive_contribution:
+  points: 2
+  thresholds:
+    DEF: 10
+    MID: 12
+    FWD: 12
