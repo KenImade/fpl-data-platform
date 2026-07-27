@@ -59,8 +59,12 @@ class PointsBreakdown:
 
 
 def score(stats: MatchStats, rules: Ruleset) -> PointsBreakdown:
+    disciplinary = PointsBreakdown(
+        cards=(stats.yellow_cards * rules.cards.yellow + stats.red_cards * rules.cards.red),
+        own_goals=stats.own_goals * rules.own_goal,
+    )
     if stats.minutes == 0:
-        return PointsBreakdown()
+        return disciplinary
 
     played_60 = stats.minutes >= 60
 

@@ -51,6 +51,22 @@ def _by_position(d: Any, ctx: str, *, required: bool = True) -> dict[Position, i
     return out
 
 
+def _by_position_bool(d: Any, ctx: str) -> dict[Position, bool]:
+    """Parse a {DEF: false, MID: true, ...} block. Absent position = False."""
+    if not isinstance(d, dict):
+        raise RulesetError(f"{ctx}: expected mapping, got {type(d).__name__}")
+    out: dict[Position, bool] = {}
+    for name, value in d.items():
+        try:
+            pos = Position[str(name)]
+        except KeyError:
+            raise RulesetError(f"{ctx}: unknown position {name!r}") from None
+        if not isinstance(value, bool):
+            raise RulesetError(f"{ctx}.{name}: expected bool, got {type(value).__name__}")
+        out[pos] = value
+    return out
+
+
 # --- structures ----------------------------------------------------------
 
 
@@ -87,12 +103,29 @@ class Penalties:
 class DefensiveContribution:
     points: int
     thresholds: dict[Position, int]  # absent position = ineligible
+    recoveries_count: dict[Position, bool]
 
     def award(self, position: Position, count: int) -> int:
         threshold = self.thresholds.get(position)
         if threshold is None:
             return 0
         return self.points if count >= threshold else 0
+
+    def actions(
+        self,
+        position: Position,
+        *,
+        tackles: int,
+        clearances_blocks_interceptions: int,
+        recoveries: int,
+    ) -> int:
+        """Count eligible defensive actions for this position."""
+        if position not in self.thresholds:
+            return 0
+        total = tackles + clearances_blocks_interceptions
+        if self.recoveries_count.get(position, False):
+            total += recoveries
+        return total
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,7 +165,7 @@ def _parse(raw: Any, source: str) -> Ruleset:
 
     dc_raw = _req(raw, "defensive_contribution", source)
 
-    return Ruleset(
+    ruleset = Ruleset(
         ruleset_id=str(_req(raw, "ruleset_id", source)),
         season=str(_req(raw, "season", source)),
         appearance=Appearance(
@@ -166,8 +199,21 @@ def _parse(raw: Any, source: str) -> Ruleset:
                 f"{source}.defensive_contribution.thresholds",
                 required=False,  # GKP is legitimately absent
             ),
+            recoveries_count=_by_position_bool(
+                _req(dc_raw, "recoveries_count", source),
+                f"{source}.defensive_contribution.recoveries_count",
+            ),
         ),
     )
+
+    dc = ruleset.defensive_contribution
+    if orphans := set(dc.recoveries_count) - set(dc.thresholds):
+        raise RulesetError(
+            f"{source}.defensive_contribution: {[p.name for p in orphans]} "
+            "have recoveries_count but no threshold"
+        )
+
+    return ruleset
 
 
 @cache
