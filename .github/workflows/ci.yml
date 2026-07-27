@@ -39,7 +39,9 @@ jobs:
 
       - name: Smoke test
         run: |
-          APP=$(grep '^app =' fly.toml | cut -d'"' -f2)
+          APP=$(grep '^app' fly.toml | sed -E "s/.*=\s*['\"]([^'\"]+)['\"].*/\1/")
+
+          echo "Deploying to Fly app: $APP"
 
           for i in {1..10}; do
             body=$(curl -fsS https://${APP}.fly.dev/health) && break
