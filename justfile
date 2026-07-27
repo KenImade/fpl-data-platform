@@ -32,3 +32,6 @@ clean:
 
 typecheck:
     uv run mypy
+
+record-fixtures:
+    uv run python scripts/record_fixtures.py
