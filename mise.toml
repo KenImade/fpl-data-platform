@@ -1,0 +1,8 @@
+[tools]
+python = "3.13"
+node = "22"
+uv = "latest"
+just = "latest"
+
+[env]
+_.file = ".envrc"

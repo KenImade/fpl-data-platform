@@ -1,0 +1,37 @@
+version = 1
+revision = 3
+requires-python = ">=3.13"
+
+[manifest]
+members = [
+    "fpl-api",
+    "fpl-core",
+    "fpl-ingestion",
+    "fpl-modelling",
+    "fpl-optimiser",
+]
+
+[[package]]
+name = "fpl-api"
+version = "0.1.0"
+source = { virtual = "." }
+
+[[package]]
+name = "fpl-core"
+version = "0.1.0"
+source = { editable = "packages/fpl-core" }
+
+[[package]]
+name = "fpl-ingestion"
+version = "0.1.0"
+source = { editable = "packages/fpl-ingestion" }
+
+[[package]]
+name = "fpl-modelling"
+version = "0.1.0"
+source = { editable = "packages/fpl-modelling" }
+
+[[package]]
+name = "fpl-optimiser"
+version = "0.1.0"
+source = { editable = "packages/fpl-optimiser" }
