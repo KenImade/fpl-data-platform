@@ -8,3 +8,15 @@ members = ["packages/*"]
 
 [tool.uv.sources]
 fpl-core = {workspace = true}
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+files = ["packages/fpl-core/src"]

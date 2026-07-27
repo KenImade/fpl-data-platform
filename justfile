@@ -29,3 +29,6 @@ fmt:
 
 clean:
     docker compose down -v
+
+typecheck:
+    uv run mypy
