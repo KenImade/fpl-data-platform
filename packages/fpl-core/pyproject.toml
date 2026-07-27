@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.13"
 dependencies = [
+    "fpl-api",
     "pyyaml>=6.0.3",
     "types-pyyaml>=6.0.12.20260724",
 ]

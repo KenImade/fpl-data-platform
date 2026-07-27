@@ -2,14 +2,23 @@
 name = "fpl-data-platform"
 version = "0.1.0"
 requires-python = ">=3.13"
+dependencies = [
+    "fpl-core",
+    "fpl-api",
+]
 
 [tool.uv.workspace]
 members = [
-    "packages/*",
+    "packages/fpl-api",
+    "packages/fpl-core",
+    "packages/fpl-ingestion",
+    "packages/fpl-modelling",
+    "packages/fpl-optimiser",
 ]
 
 [tool.uv.sources]
-fpl-core = {workspace = true}
+fpl-core = { workspace = true }
+fpl-api = { workspace = true }
 
 [tool.ruff]
 line-length = 100
@@ -21,7 +30,20 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.mypy]
 python_version = "3.13"
 strict = true
-files = ["packages/fpl-core/src"]
+mypy_path = [
+    "packages/fpl-api/src",
+    "packages/fpl-core/src",
+    "packages/fpl-ingestion/src",
+    "packages/fpl-modelling/src",
+    "packages/fpl-optimiser/src",
+]
+files = [
+    "packages/fpl-api/src",
+    "packages/fpl-core/src",
+    "packages/fpl-ingestion/src",
+    "packages/fpl-modelling/src",
+    "packages/fpl-optimiser/src",
+]
 
 [dependency-groups]
 dev = [

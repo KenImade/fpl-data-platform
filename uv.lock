@@ -166,6 +166,7 @@ version = "0.1.0"
 source = { editable = "packages/fpl-api" }
 dependencies = [
     { name = "fastapi" },
+    { name = "fpl-core" },
     { name = "uvicorn" },
 ]
 
@@ -178,6 +179,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.140.5" },
+    { name = "fpl-core", editable = "packages/fpl-core" },
     { name = "uvicorn", specifier = ">=0.51.0" },
 ]
 
@@ -192,12 +194,14 @@ name = "fpl-core"
 version = "0.1.0"
 source = { editable = "packages/fpl-core" }
 dependencies = [
+    { name = "fpl-api" },
     { name = "pyyaml" },
     { name = "types-pyyaml" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "fpl-api", editable = "packages/fpl-api" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "types-pyyaml", specifier = ">=6.0.12.20260724" },
 ]
@@ -206,6 +210,10 @@ requires-dist = [
 name = "fpl-data-platform"
 version = "0.1.0"
 source = { virtual = "." }
+dependencies = [
+    { name = "fpl-api" },
+    { name = "fpl-core" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -216,6 +224,10 @@ dev = [
 ]
 
 [package.metadata]
+requires-dist = [
+    { name = "fpl-api", editable = "packages/fpl-api" },
+    { name = "fpl-core", editable = "packages/fpl-core" },
+]
 
 [package.metadata.requires-dev]
 dev = [
