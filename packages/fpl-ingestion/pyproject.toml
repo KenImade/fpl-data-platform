@@ -6,9 +6,13 @@ readme = "README.md"
 authors = [
     { name = "Kenneth Imade", email = "kenneth.imade@yahoo.com" }
 ]
-requires-python = ">=3.13"
+requires-python = ">=3.13,<3.14"
 dependencies = [
+    "boto3>=1.43.57",
     "botocore>=1.43.57",
+    "dagster>=1.13.15",
+    "dagster-postgres>=0.29.15",
+    "dagster-webserver>=1.13.15",
     "httpx>=0.28.1",
 ]
 

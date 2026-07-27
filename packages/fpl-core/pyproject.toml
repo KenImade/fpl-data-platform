@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [
     { name = "Kenneth Imade", email = "kenneth.imade@yahoo.com" }
 ]
-requires-python = ">=3.13"
+requires-python = ">=3.13,<3.14"
 dependencies = [
     "fpl-api",
     "pyyaml>=6.0.3",

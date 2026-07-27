@@ -1,10 +1,11 @@
-set dotenv-load := true
-
 default:
     @just --list
 
-bootstrap: up _bucket
-    uv sync
+_dagster_db:
+    docker compose exec -T postgres psql -U fpl -c "CREATE DATABASE dagster" || true
+
+bootstrap: up _bucket _dagster_db
+    uv sync --all-packages
     @echo "ready"
 
 up:
@@ -35,3 +36,6 @@ typecheck:
 
 record-fixtures:
     uv run python scripts/record_fixtures.py
+
+dev:
+    uv run dagster dev -m fpl_ingestion.definitions

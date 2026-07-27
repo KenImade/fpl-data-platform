@@ -49,7 +49,7 @@ def capture(client: httpx.Client, store: Store, *, now: datetime | None = None) 
         store.put(key, response.body)
         stored[name] = key
 
-        if name == "boostrap-static":
+        if name == "bootstrap-static":
             store.put(LATEST_BOOTSTRAP, response.body, overwrite=True)
 
     return CaptureResult(at=at, stored=stored, failed=failed)
