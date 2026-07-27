@@ -1,10 +1,12 @@
 [project]
-name = "fpl-api"
+name = "fpl-data-platform"
 version = "0.1.0"
 requires-python = ">=3.13"
 
 [tool.uv.workspace]
-members = ["packages/*"]
+members = [
+    "packages/*",
+]
 
 [tool.uv.sources]
 fpl-core = {workspace = true}
@@ -20,3 +22,8 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 python_version = "3.13"
 strict = true
 files = ["packages/fpl-core/src"]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.6.1",
+]
