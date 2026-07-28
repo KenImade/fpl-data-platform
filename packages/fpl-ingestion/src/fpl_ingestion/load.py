@@ -99,17 +99,39 @@ def read_frames(store: Store, keys: list[str]) -> pl.DataFrame:
 
 
 def load_table(store: Store, conn_str: str, spec: LoadSpec) -> dict[str, object]:
-    """Load one spec into `bronze.{table}`, replacing what was there."""
+    """Load one spec into `bronze.{table}`.
+
+    Truncate-and-append rather than replace. `replace` issues DROP TABLE,
+    which Postgres refuses once a dbt view depends on the table — and
+    dropping with CASCADE would silently delete the dbt models.
+
+    Truncating keeps the table object (and the views pointing at it) intact
+    while still giving replace semantics for the data.
+    """
     keys = select_keys(store, spec)
     if not keys:
         raise ValueError(f"no parquet found for {spec.table} under {spec.prefix}")
 
     df = read_frames(store, keys)
+    table = f"{SCHEMA}.{spec.table}"
+
+    import adbc_driver_postgresql.dbapi as pg
+
+    with pg.connect(conn_str) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT 1 FROM information_schema.tables "
+            "WHERE table_schema = $1 AND table_name = $2",
+            (SCHEMA, spec.table),
+        )
+        exists = cur.fetchone() is not None
+        if exists:
+            cur.execute(f"TRUNCATE TABLE {table}")
+            conn.commit()
 
     df.write_database(
-        f"{SCHEMA}.{spec.table}",
+        table,
         conn_str,
-        if_table_exists="replace",
+        if_table_exists="append" if exists else "replace",
         engine="adbc",
     )
 
