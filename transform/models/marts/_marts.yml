@@ -34,3 +34,49 @@ models:
               arguments:
                 to: ref('stg_matches')
                 field: match_id
+  
+  - name: dim_person
+    description: >
+      One row per human being, keyed on player_code — FPL's identifier that
+      persists across seasons.
+
+      This exists because player_id does not. FPL reassigns element IDs each
+      August, so a cross-season join on player_id will attach one player's
+      history to whoever inherited their number. dim_person is the join
+      target for anything spanning more than a single season: career form,
+      historical per-90 rates, a player's record against a given opponent.
+
+      Descriptive fields (name, position, club) come from the most recent
+      season the person appears in, because all three change. Names get
+      re-rendered, players are reclassified between positions, and clubs move
+      players. Anything needing the value *as at* a particular season should
+      join stg_players on (player_code, season) rather than reading it here.
+
+      first_season and last_season bound the career AS OBSERVED IN THIS
+      WAREHOUSE, not in reality. Coverage begins at 2024/25, so a player
+      active for a decade before that still shows first_season = 2024-2025.
+
+      has_changed_position flags a modelling hazard rather than a curiosity:
+      a defender reclassified as a midfielder accrued their historical
+      per-90 rates under different scoring rules and different defensive
+      contribution thresholds, so their history is not directly comparable
+      to their present.
+    columns:
+      - name: player_code
+        description: >
+          FPL's stable cross-season identifier. The grain of this table and
+          the correct key for any historical join.
+        tests: [not_null]
+      - name: current_position
+        description: Position in the most recent observed season, not necessarily historical.
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['GKP', 'DEF', 'MID', 'FWD']
+      - name: first_season
+        description: Earliest season observed here — a coverage boundary, not a debut.
+      - name: has_changed_position
+        description: >
+          True if the person appears under more than one position across
+          observed seasons. Their historical rates were accrued under
+          different scoring rules.
