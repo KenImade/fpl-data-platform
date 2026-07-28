@@ -1,37 +1,26 @@
 import os
-from datetime import UTC, datetime
-from pathlib import Path
+from datetime import UTC, date, datetime
 
-import boto3
 from dagster import (
+    DailyPartitionsDefinition,
     Definitions,
     OpExecutionContext,
     RunRequest,
     SkipReason,
+    asset,
     job,
     op,
     sensor,
 )
 
+from fpl_ingestion.bronze import build_bootstrap_bronze
 from fpl_ingestion.capture import capture
 from fpl_ingestion.client import make_client
 from fpl_ingestion.deadlines import read_deadlines
+from fpl_ingestion.resources import build_store
 from fpl_ingestion.schedule import decide
-from fpl_ingestion.storage import LocalStore, S3Store
 
-
-def build_store():
-    if os.environ.get("DRY_RUN"):
-        return LocalStore(Path("local-capture"))
-    return S3Store(
-        boto3.client(
-            "s3",
-            endpoint_url=os.environ["S3_ENDPOINT_URL"],
-            aws_access_key_id=os.environ["S3_ACCESS_KEY_ID"],
-            aws_secret_access_key=os.environ["S3_SECRET_ACCESS_KEY"],
-        ),
-        os.environ["S3_BUCKET"],
-    )
+daily = DailyPartitionsDefinition(start_date="2026-07-27")
 
 
 @op
@@ -67,4 +56,14 @@ def fpl_capture_sensor(context):
     return RunRequest(run_key=now.strftime("%Y%m%dT%H%M%S"))
 
 
-defs = Definitions(jobs=[capture_job], sensors=[fpl_capture_sensor])
+@asset(partitions_def=daily)
+def bootstrap_bronze(context) -> None:
+    meta = build_bootstrap_bronze(build_store(), date.fromisoformat(context.partition_key))
+    context.add_output_metadata(meta)
+
+
+defs = Definitions(
+    jobs=[capture_job],
+    sensors=[fpl_capture_sensor],
+    assets=[bootstrap_bronze],
+)

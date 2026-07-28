@@ -5,6 +5,7 @@ from unittest.mock import Mock, call, patch
 
 from fpl_ingestion.capture import CaptureResult, capture
 from fpl_ingestion.client import ENDPOINTS, RateLimited
+from fpl_ingestion.storage import LATEST_BOOTSTRAP
 
 NOW = datetime(2025, 8, 17, 14, 5, 9, tzinfo=UTC)
 
@@ -53,6 +54,7 @@ def test_capture_all_endpoints():
 
     assert store.put.call_args_list == [
         call("k1", b"bootstrap"),
+        call(LATEST_BOOTSTRAP, b"bootstrap", overwrite=True),
         call("k2", b"fixtures"),
         call("k3", b"events"),
     ]
