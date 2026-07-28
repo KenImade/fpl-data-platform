@@ -28,3 +28,30 @@ models:
                 max_value: 270
       - name: points
         tests: [not_null]
+  
+  - name: stg_matches
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [match_id]
+    columns:
+      - name: match_id
+        tests: [not_null]
+      - name: competition
+        tests: [not_null]
+      - name: home_team_code
+        tests:
+          - not_null:
+              config:
+                where: "is_league"
+      - name: away_team_code
+        tests:
+          - not_null:
+              config:
+                where: "is_league"
+      - name: kickoff_utc
+        tests:
+          - not_null:
+              config:
+                where: "is_league"
+                severity: warn
