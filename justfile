@@ -1,3 +1,5 @@
+set shell := ["bash", "-uc"]
+
 default:
     @just --list
 
@@ -39,3 +41,20 @@ record-fixtures:
 
 dev:
     uv run dagster dev -m fpl_ingestion.definitions
+
+wipe:
+    uv run python scripts/wipe.py
+
+wipe-yes:
+    uv run python scripts/wipe.py --yes
+
+wipe-derived:
+    uv run python scripts/wipe.py --derived --yes
+
+seed:
+    uv run dagster job execute -m fpl_ingestion.definitions -j ci_snapshot_job
+    uv run dagster job execute -m fpl_ingestion.definitions -j ci_daily_job \
+        --tags '{"dagster/partition": "'$(date -u +%F)'"}'
+    uv run dagster job execute -m fpl_ingestion.definitions -j fpl_bronze_job \
+        --tags '{"dagster/partition": "'$(date -u +%F)'"}'
+    uv run dagster job execute -m fpl_ingestion.definitions -j load_job

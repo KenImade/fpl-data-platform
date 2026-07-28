@@ -1,24 +1,32 @@
-import os
 from datetime import UTC, date, datetime, timedelta
 
 from dagster import (
+    AssetCheckExecutionContext,
     AssetCheckResult,
     AssetCheckSeverity,
+    AssetDep,
+    AssetExecutionContext,
+    ConfigurableResource,
     DailyPartitionsDefinition,
+    DefaultScheduleStatus,
     DefaultSensorStatus,
     Definitions,
+    EnvVar,
     FreshnessPolicy,
+    LastPartitionMapping,
     OpExecutionContext,
     RunFailureSensorContext,
     RunRequest,
-    ScheduleEvaluationContext,
+    ScheduleDefinition,
+    SensorEvaluationContext,
     SkipReason,
     asset,
     asset_check,
+    build_schedule_from_partitioned_job,
+    define_asset_job,
     job,
     op,
     run_failure_sensor,
-    schedule,
     sensor,
 )
 
@@ -27,61 +35,80 @@ from fpl_ingestion.bronze import build_bootstrap_bronze
 from fpl_ingestion.capture import capture
 from fpl_ingestion.checks import check_captured_near_deadline
 from fpl_ingestion.client import make_client
+from fpl_ingestion.core_insights import (
+    ARCHIVE_TABLES,
+    DAILY_TABLES,
+    build_archive,
+    build_daily,
+)
 from fpl_ingestion.deadlines import read_deadlines
 from fpl_ingestion.heartbeat import ping
-from fpl_ingestion.mirror import mirror_masters, mirror_tarball
-from fpl_ingestion.resources import STORE, StoreResource
+from fpl_ingestion.load import SPECS, LoadSpec, ensure_schema, load_table
+from fpl_ingestion.mirror import mirror_archive, mirror_masters, mirror_tarball
+from fpl_ingestion.resources import POSTGRES, STORE, PostgresResource, StoreResource
 from fpl_ingestion.schedule import decide
+from fpl_ingestion.tarball import BUILDS, Scope, build_gameweek_table
 
-daily = DailyPartitionsDefinition(start_date="2026-07-27")
+# end_offset=1 includes the in-progress day. Without it the newest partition
+# is always yesterday's, so nothing can be materialised on the day it lands —
+# which makes a cold-start rebuild impossible to verify.
+daily = DailyPartitionsDefinition(start_date="2026-07-28", end_offset=1)
+
+
+# ---------------------------------------------------------------------------
+# resources
+# ---------------------------------------------------------------------------
+
+
+class FplClientResource(ConfigurableResource):
+    """HTTP identity for outbound requests.
+
+    Declared rather than read from os.environ inside each op, so a missing
+    User-Agent fails at code-location load instead of on the first run.
+    """
+
+    user_agent: str
+
+    def client(self):
+        return make_client(self.user_agent)
+
+
+FPL_CLIENT = FplClientResource(user_agent=EnvVar("USER_AGENT"))
+
+
+# ---------------------------------------------------------------------------
+# capture — the only imperative path
+# ---------------------------------------------------------------------------
+#
+# A capture is an OBSERVATION, not derivable state. The FPL API serves only
+# the current moment, so a snapshot missed at 17:25 on a deadline day cannot
+# be reconstructed later at any price. That makes it genuinely event-driven
+# and the one thing here that belongs to a sensor rather than the asset graph.
+#
+# Everything else is reconstructible from an upstream that still exists, and
+# is therefore an asset.
 
 
 @op
-def capture_op(context: OpExecutionContext, store: StoreResource) -> None:
-    with make_client(os.environ["USER_AGENT"]) as client:
-        result = capture(client, store.build())
+def capture_op(context: OpExecutionContext, store: StoreResource, fpl: FplClientResource) -> None:
+    try:
+        with fpl.client() as client:
+            result = capture(client, store.build())
+    except Exception:
+        ping("/fail")
+        raise
 
     for name, key in result.stored.items():
         context.log.info("stored %s -> %s", name, key)
 
     if not result.ok:
+        # /fail alerts immediately rather than waiting out the grace period.
         ping("/fail")
         raise RuntimeError(f"capture incomplete: {result.failed}")
 
+    # After storage, never before: a ping on job start would only prove the
+    # scheduler works, not that data landed.
     ping()
-
-
-@op
-def mirror_masters_op(context: OpExecutionContext, store: StoreResource) -> None:
-    day = date.fromisoformat(context.run.tags.get("mirror/day", str(datetime.now(UTC).date())))
-
-    with make_client(os.environ["USER_AGENT"]) as client:
-        result = mirror_masters(client, store.build(), day)
-        context.log.info("mirror %s: %s", day, result)
-        context.add_output_metadata(result)
-
-    if result["failed"]:
-        context.log.warning("%d files failed to mirror", result["failed"])
-
-
-@op
-def mirror_tarball_op(context: OpExecutionContext, store: StoreResource) -> None:
-    day = datetime.now(UTC).date()
-
-    with make_client(os.environ["USER_AGENT"]) as client:
-        result = mirror_tarball(client, store.build(), day)
-        context.log.info("tarball %s: %s", day, result)
-        context.add_output_metadata(result)
-
-
-@job
-def mirror_tarball_job() -> None:
-    mirror_tarball_op()
-
-
-@job
-def mirror_masters_job() -> None:
-    mirror_masters_op()
 
 
 @job
@@ -89,33 +116,18 @@ def capture_job() -> None:
     capture_op()
 
 
-@schedule(job=mirror_tarball_job, cron_schedule="0 20 * * 0", execution_timezone="UTC")
-def mirror_tarball_schedule():
-    """Weekly rather than daily, the tarball is large and
-    past gameweek snapshots don't change."""
-    return {}
-
-
-@schedule(
-    job=mirror_masters_job,
-    cron_schedule="0 19 * * *",
-    execution_timezone="UTC",
+@sensor(
+    job=capture_job,
+    minimum_interval_seconds=60,
+    default_status=DefaultSensorStatus.RUNNING,
 )
-def mirror_masters_schedule(context: ScheduleEvaluationContext):
-    """Daily. Deliberately separate from the FPL capture sensor.
+def fpl_capture_sensor(context: SensorEvaluationContext, store: StoreResource):
+    """Gated on elapsed time since the last capture, never wall-clock minute.
 
-    Sharing that cadence would mean 15-minute pulls during deadline
-    windows, roughly760 requests and several GB of downloads a day,
-    for a source that refreshes twice.
+    A delayed tick captures late rather than not at all. The cursor is
+    Dagster-managed and survives restarts.
     """
-    day = context.scheduled_execution_time.astimezone(UTC).date()
-    return {"tags": {"mirror/day": str(day)}}
-
-
-@sensor(job=capture_job, minimum_interval_seconds=60)
-def fpl_capture_sensor(context, store: StoreResource):
     now = datetime.now(UTC)
-
     last = datetime.fromisoformat(context.cursor) if context.cursor else None
     decision = decide(now, last, read_deadlines(store.build()))
 
@@ -126,18 +138,324 @@ def fpl_capture_sensor(context, store: StoreResource):
     return RunRequest(run_key=now.strftime("%Y%m%dT%H%M%S"))
 
 
+# ---------------------------------------------------------------------------
+# raw — Core Insights mirrors
+# ---------------------------------------------------------------------------
+
+
+@asset(partitions_def=daily, group_name="raw_core_insights")
+def ci_masters_raw(
+    context: AssetExecutionContext, store: StoreResource, fpl: FplClientResource
+) -> None:
+    """Daily master CSVs. Idempotent by key existence."""
+    day = date.fromisoformat(context.partition_key)
+    with fpl.client() as client:
+        result = mirror_masters(client, store.build(), day)
+
+    context.add_output_metadata(result)
+    if result["failed"]:
+        context.log.warning("%d files failed to mirror", result["failed"])
+
+
+@asset(group_name="raw_core_insights")
+def ci_archive_raw(
+    context: AssetExecutionContext, store: StoreResource, fpl: FplClientResource
+) -> None:
+    """The finished 2024/25 season.
+
+    Static, but declarative rather than a manual script: an empty bucket
+    recovers on materialisation instead of requiring someone to remember a
+    command that isn't in any schedule.
+    """
+    with fpl.client() as client:
+        result = mirror_archive(client, store.build())
+
+    context.add_output_metadata(result)
+    if result["failed"]:
+        context.log.warning("%d archive files failed", result["failed"])
+
+
+@asset(group_name="raw_core_insights")
+def ci_tarball_raw(
+    context: AssetExecutionContext, store: StoreResource, fpl: FplClientResource
+) -> None:
+    """Full repository snapshot.
+
+    Weekly by schedule, but fetches unconditionally when no tarball exists at
+    all — so a wiped or newly deployed environment recovers immediately
+    rather than waiting up to seven days for Sunday.
+    """
+    with fpl.client() as client:
+        result = mirror_tarball(client, store.build(), datetime.now(UTC).date())
+
+    context.add_output_metadata(result)
+    if result["failed"]:
+        raise RuntimeError("tarball mirror failed")
+
+
+# ---------------------------------------------------------------------------
+# bronze
+# ---------------------------------------------------------------------------
+
+
+@asset(
+    partitions_def=daily,
+    group_name="bronze_fpl",
+    freshness_policy=FreshnessPolicy.cron(
+        deadline_cron="0 6 * * *",
+        lower_bound_delta=timedelta(hours=24),
+    ),
+)
+def bootstrap_bronze(context: AssetExecutionContext, store: StoreResource) -> None:
+    meta = build_bootstrap_bronze(store.build(), date.fromisoformat(context.partition_key))
+    context.add_output_metadata(meta)
+
+
+@asset_check(asset=bootstrap_bronze, blocking=False)
+def captured_near_deadline(
+    context: AssetCheckExecutionContext, store: StoreResource
+) -> AssetCheckResult:
+    """The check that catches success-with-no-data.
+
+    Everything else fires when something fails. This fires when the system
+    ran, reported success, and captured nothing useful — the only failure
+    mode whose cost is permanent.
+    """
+    s = store.build()
+    day = date.fromisoformat(context.partition_key)
+    r = check_captured_near_deadline(s, day, read_deadlines(s))
+    return AssetCheckResult(passed=r.passed, severity=AssetCheckSeverity.ERROR, metadata=r.metadata)
+
+
+def _ci_daily_asset(table: str):
+    """One asset per Core Insights daily master table.
+
+    `table` is a parameter of this factory, so each call binds its own. Note
+    that adding a bound default argument here would make Dagster treat it as
+    an upstream asset input rather than a closure.
+    """
+
+    @asset(
+        name=f"ci_{table}_daily",
+        partitions_def=daily,
+        group_name="bronze_core_insights",
+        deps=[ci_masters_raw],
+    )
+    def _asset(context: AssetExecutionContext, store: StoreResource) -> None:
+        meta = build_daily(store.build(), table, date.fromisoformat(context.partition_key))
+        context.add_output_metadata(meta)
+
+    return _asset
+
+
+def _ci_archive_asset(table: str):
+    @asset(
+        name=f"ci_{table}_archive",
+        group_name="bronze_core_insights",
+        deps=[ci_archive_raw],
+    )
+    def _asset(context: AssetExecutionContext, store: StoreResource) -> None:
+        context.add_output_metadata(build_archive(store.build(), table))
+
+    return _asset
+
+
+def _tarball_asset(table: str, scope: Scope):
+    @asset(
+        name=f"ci_{table}_{scope}s",
+        group_name="bronze_core_insights",
+        deps=[ci_tarball_raw],
+    )
+    def _asset(context: AssetExecutionContext, store: StoreResource) -> None:
+        context.add_output_metadata(build_gameweek_table(store.build(), table, scope=scope))
+
+    return _asset
+
+
+def _load_asset(spec: LoadSpec, deps: list):
+    """Bronze parquet -> bronze.{table} in Postgres.
+
+    The boundary between Dagster and dbt. Everything above this line is
+    Dagster's; everything below reads `bronze` and writes its own schemas.
+
+    Deps are passed in explicitly rather than inferred: these assets resolve
+    their inputs from object storage rather than from an upstream asset's
+    output, so Dagster cannot work the graph out on its own.
+    """
+
+    @asset(name=spec.table, group_name="warehouse_bronze", deps=deps)
+    def _asset(
+        context: AssetExecutionContext,
+        store: StoreResource,
+        postgres: PostgresResource,
+    ) -> None:
+        conn = postgres.connection_string()
+        ensure_schema(conn)
+        context.add_output_metadata(load_table(store.build(), conn, spec))
+
+    return _asset
+
+
+ci_daily_assets = [_ci_daily_asset(t) for t in DAILY_TABLES]
+ci_archive_assets = [_ci_archive_asset(t) for t in ARCHIVE_TABLES]
+tarball_assets = [_tarball_asset(t, s) for t, s in BUILDS]
+
+ci_daily_by_table = dict(zip(DAILY_TABLES, ci_daily_assets, strict=True))
+ci_archive_by_table = dict(zip(ARCHIVE_TABLES, ci_archive_assets, strict=True))
+tarball_by_key = {f"{t}_{s}": a for (t, s), a in zip(BUILDS, tarball_assets, strict=True)}
+
+
+def _last(asset_def) -> AssetDep:
+    """Depend on the most recent partition, not every partition.
+
+    Dagster's default for partitioned -> unpartitioned is AllPartitionMapping,
+    which would declare a dependency on all 365 partitions of a year-old
+    asset and leave staleness permanently red.
+    """
+    return AssetDep(asset_def, partition_mapping=LastPartitionMapping())
+
+
+# Each load table and the bronze assets that produce its parquet. A spec with
+# no entry raises KeyError at import, which is intended — a new load target
+# should not silently acquire an empty dependency set.
+LOAD_DEPS: dict[str, list] = {
+    "fpl_players": [_last(bootstrap_bronze)],
+    "ci_playerstats": [
+        _last(ci_daily_by_table["playerstats"]),
+        ci_archive_by_table["playerstats"],
+    ],
+    # No archive: 2024/25 used the nested layout and never published this file.
+    "ci_gameweek_summaries": [_last(ci_daily_by_table["gameweek_summaries"])],
+    "ci_players": [
+        _last(ci_daily_by_table["players"]),
+        ci_archive_by_table["players"],
+    ],
+    "ci_teams": [
+        _last(ci_daily_by_table["teams"]),
+        ci_archive_by_table["teams"],
+    ],
+    # Tarball only: no flat master exists for this in any season.
+    "ci_player_gameweek_stats": [tarball_by_key["player_gameweek_stats_gameweek"]],
+    # Tarball for active seasons, archive for 2024/25 — the only route to
+    # that season's CBIT components, and so to the defensive contribution
+    # reconstruction.
+    "ci_matches": [
+        tarball_by_key["matches_tournament"],
+        ci_archive_by_table["matches"],
+    ],
+    "ci_playermatchstats": [
+        tarball_by_key["playermatchstats_tournament"],
+        ci_archive_by_table["playermatchstats"],
+    ],
+}
+
+load_assets = [_load_asset(s, LOAD_DEPS[s.table]) for s in SPECS]
+
+ALL_ASSETS = [
+    ci_masters_raw,
+    ci_archive_raw,
+    ci_tarball_raw,
+    bootstrap_bronze,
+    *ci_daily_assets,
+    *ci_archive_assets,
+    *tarball_assets,
+    *load_assets,
+]
+
+
+# ---------------------------------------------------------------------------
+# jobs
+# ---------------------------------------------------------------------------
+
+# Two partitioned jobs rather than one, because a job carries a single
+# partitions definition and the two sources start on different days.
+fpl_bronze_job = define_asset_job(
+    "fpl_bronze_job",
+    selection=[bootstrap_bronze],
+    partitions_def=daily,
+)
+
+ci_daily_job = define_asset_job(
+    "ci_daily_job",
+    selection=[ci_masters_raw, *ci_daily_assets],
+    partitions_def=daily,
+)
+
+ci_snapshot_job = define_asset_job(
+    "ci_snapshot_job",
+    selection=[
+        ci_archive_raw,
+        ci_tarball_raw,
+        *ci_archive_assets,
+        *tarball_assets,
+    ],
+)
+
+load_job = define_asset_job("load_job", selection=load_assets)
+
+# ---------------------------------------------------------------------------
+# schedules
+# ---------------------------------------------------------------------------
+#
+# default_status=RUNNING throughout: a fresh deploy or a wiped instance comes
+# up automating itself rather than silently idle until someone remembers to
+# flip switches in the UI.
+
+fpl_bronze_schedule = build_schedule_from_partitioned_job(
+    fpl_bronze_job,
+    hour_of_day=19,
+    minute_of_hour=30,
+    default_status=DefaultScheduleStatus.RUNNING,
+)
+
+# Fetch and build the daily masters together — the raw asset is upstream of
+# the bronze ones in the same job, so ordering is the graph's problem.
+ci_daily_schedule = build_schedule_from_partitioned_job(
+    ci_daily_job,
+    hour_of_day=19,
+    minute_of_hour=0,
+    default_status=DefaultScheduleStatus.RUNNING,
+)
+
+ci_snapshot_schedule = ScheduleDefinition(
+    job=ci_snapshot_job,
+    cron_schedule="0 20 * * 0",  # Sundays
+    execution_timezone="UTC",
+    default_status=DefaultScheduleStatus.RUNNING,
+)
+
+# Daily, though ci_snapshot_job only runs on Sundays — so the tarball-derived
+# tables reload identical parquet six days a week. Harmless under replace
+# semantics and cheap at this volume.
+load_schedule = ScheduleDefinition(
+    job=load_job,
+    cron_schedule="0 21 * * *",
+    execution_timezone="UTC",
+    default_status=DefaultScheduleStatus.RUNNING,
+)
+
+
+# ---------------------------------------------------------------------------
+# alerting
+# ---------------------------------------------------------------------------
+
+
 @run_failure_sensor(
     monitor_all_code_locations=True,
     default_status=DefaultSensorStatus.RUNNING,
 )
 def failure_alert_sensor(context: RunFailureSensorContext, store: StoreResource) -> None:
-    """Route run failures by proximity to the next deadline"""
+    """Route run failures by proximity to the next deadline.
+
+    A failed capture on a Tuesday costs one observation out of eight. The
+    same failure at 14:00 on 21 August costs the pre-deadline state
+    permanently.
+    """
     now = datetime.now(UTC)
     severity = failure_severity(now, read_deadlines(store.build()))
 
-    job_name = context.dagster_run.job_name
     message = (
-        f"[{severity.upper()}] {job_name} failed\n"
+        f"[{severity.upper()}] {context.dagster_run.job_name} failed\n"
         f"{context.failure_event.message}\n"
         f"run: {context.dagster_run.run_id}"
     )
@@ -151,31 +469,24 @@ def failure_alert_sensor(context: RunFailureSensorContext, store: StoreResource)
         context.log.info(message)
 
 
-@asset(
-    partitions_def=daily,
-    freshness_policy=FreshnessPolicy.cron(
-        deadline_cron="0 6 * * *",  # fresh by 06:00 UTC daily
-        lower_bound_delta=timedelta(hours=24),
-    ),
-)
-def bootstrap_bronze(context, store: StoreResource) -> None:
-    meta = build_bootstrap_bronze(store.build(), date.fromisoformat(context.partition_key))
-    context.add_output_metadata(meta)
-
-
-@asset_check(asset=bootstrap_bronze, blocking=False)
-def captured_near_deadline(context, store: StoreResource) -> AssetCheckResult:
-    s = store.build()
-    day = date.fromisoformat(context.partition_key)
-    r = check_captured_near_deadline(s, day, read_deadlines(s))
-    return AssetCheckResult(passed=r.passed, severity=AssetCheckSeverity.ERROR, metadata=r.metadata)
-
+# ---------------------------------------------------------------------------
 
 defs = Definitions(
-    resources={"store": STORE},
-    jobs=[capture_job, mirror_masters_job, mirror_tarball_job],
-    sensors=[fpl_capture_sensor, failure_alert_sensor],
-    schedules=[mirror_masters_schedule, mirror_tarball_schedule],
-    assets=[bootstrap_bronze],
+    resources={"store": STORE, "postgres": POSTGRES, "fpl": FPL_CLIENT},
+    assets=ALL_ASSETS,
     asset_checks=[captured_near_deadline],
+    jobs=[
+        capture_job,
+        fpl_bronze_job,
+        ci_daily_job,
+        ci_snapshot_job,
+        load_job,
+    ],
+    schedules=[
+        fpl_bronze_schedule,
+        ci_daily_schedule,
+        ci_snapshot_schedule,
+        load_schedule,
+    ],
+    sensors=[fpl_capture_sensor, failure_alert_sensor],
 )

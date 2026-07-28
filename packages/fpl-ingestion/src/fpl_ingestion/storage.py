@@ -33,6 +33,8 @@ class Store(Protocol):
     def get(self, key: str, *, decompress: bool = True) -> bytes: ...
     def exists(self, key: str) -> bool: ...
     def list(self, prefix: str) -> list[str]: ...
+    def delete(self, key: str) -> bool: ...
+    def delete_prefix(self, prefix: str) -> int: ...
 
 
 class LocalStore:
@@ -64,7 +66,7 @@ class LocalStore:
 
     def list(self, prefix: str) -> list[str]:
         """Keys under prefix, sorted. Mirrors S3 semantics: string prefix
-        matching over the whole key, not dictionary listing."""
+        matching over the whole key, not directory listing."""
         if not self.root.exists():
             return []
         return sorted(
@@ -73,9 +75,38 @@ class LocalStore:
             if p.is_file() and str(p.relative_to(self.root)).startswith(prefix)
         )
 
+    def delete(self, key: str) -> bool:
+        """True if something was removed, False if the key was absent."""
+        path = self._path(key)
+        if not path.exists():
+            return False
+        path.unlink()
+        return True
+
+    def delete_prefix(self, prefix: str) -> int:
+        """Delete every key under prefix. Returns the count removed.
+
+        An empty prefix deletes everything — that is deliberate, and the
+        caller is expected to mean it.
+        """
+        keys = self.list(prefix)
+        for key in keys:
+            self._path(key).unlink()
+
+        # Tidy the directory tree left behind, deepest first.
+        if self.root.exists():
+            for path in sorted(self.root.rglob("*"), key=lambda p: -len(p.parts)):
+                if path.is_dir() and not any(path.iterdir()):
+                    path.rmdir()
+
+        log.info("deleted %d objects under %r", len(keys), prefix)
+        return len(keys)
+
 
 class S3Store:
     """S3-compatible (Cloudflare R2)."""
+
+    DELETE_BATCH = 1000  # S3 API limit per DeleteObjects call
 
     def __init__(self, client, bucket: str) -> None:
         self.client = client
@@ -117,9 +148,37 @@ class S3Store:
     def list(self, prefix: str) -> list[str]:
         """Paginated. list_objects_v2 truncates at 1000 keys and returns them
         lexicographically, so an unpaginated call silently loses everything
-        after the first thousand."""
+        after the first thousand — and loses the NEWEST keys, since ours sort
+        by time."""
         keys: list[str] = []
         paginator = self.client.get_paginator("list_objects_v2")
         for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
             keys.extend(o["Key"] for o in page.get("Contents", []))
         return sorted(keys)
+
+    def delete(self, key: str) -> bool:
+        """True if something was removed, False if the key was absent.
+
+        S3 DeleteObject succeeds on a missing key, so existence is checked
+        first to make the return value meaningful.
+        """
+        if not self.exists(key):
+            return False
+        self.client.delete_object(Bucket=self.bucket, Key=key)
+        return True
+
+    def delete_prefix(self, prefix: str) -> int:
+        """Delete every key under prefix, in batches. Returns the count.
+
+        An empty prefix deletes everything in the bucket — that is
+        deliberate, and the caller is expected to mean it.
+        """
+        keys = self.list(prefix)
+        for i in range(0, len(keys), self.DELETE_BATCH):
+            batch = keys[i : i + self.DELETE_BATCH]
+            self.client.delete_objects(
+                Bucket=self.bucket,
+                Delete={"Objects": [{"Key": k} for k in batch], "Quiet": True},
+            )
+        log.info("deleted %d objects under %r", len(keys), prefix)
+        return len(keys)
