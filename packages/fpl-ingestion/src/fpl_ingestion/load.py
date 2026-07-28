@@ -78,11 +78,12 @@ def select_keys(store: Store, spec: LoadSpec) -> list[str]:
         return []
 
     if spec.selection == "latest":
-        # Keys are date-suffixed, so lexicographic order is chronological.
-        # The 2024/25 archive sorts as `archive-...` and would win a naive
-        # max(), so prefer a dated key when one exists.
+        # The daily snapshot carries every ACTIVE season, so one is enough —
+        # 365 copies of the same 800 rows is waste. But the archive is a
+        # different season that appears nowhere else, so it always comes too.
         dated = [k for k in keys if "archive-" not in k]
-        return [max(dated or keys)]
+        archives = [k for k in keys if "archive-" in k]
+        return ([max(dated)] if dated else []) + archives
 
     return sorted(keys)
 

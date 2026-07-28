@@ -97,18 +97,43 @@ def test_latest_returns_newest_dated_key(store) -> None:
     assert select_keys(store, spec) == ["bronze/core-insights/teams/2026-07-29.parquet"]
 
 
-def test_latest_prefers_dated_over_archive(store) -> None:
-    """`archive-2024-2025` sorts before any `2026-...` key, so a naive max()
-    would pin this table to a finished season forever."""
+def test_latest_falls_back_to_archive_when_only_option(store) -> None:
     put_parquet(store, "bronze/core-insights/teams/archive-2024-2025.parquet", frame(id=[1]))
-    put_parquet(store, "bronze/core-insights/teams/2026-07-28.parquet", frame(id=[2]))
+
+    spec = LoadSpec("ci_teams", "bronze/core-insights/teams/", selection="latest")
+
+    assert select_keys(store, spec) == ["bronze/core-insights/teams/archive-2024-2025.parquet"]
+
+
+def test_latest_takes_newest_dated_and_all_archives(store) -> None:
+    """The archive is a season that exists nowhere else. Excluding it drops
+    2024/25 entirely, and with it the only per-match data for that season
+    and the positions needed to reconstruct defensive contribution.
+    """
+    put_parquet(store, "bronze/core-insights/teams/archive-2024-2025.parquet", frame(id=[1]))
+    put_parquet(store, "bronze/core-insights/teams/2026-07-27.parquet", frame(id=[2]))
+    put_parquet(store, "bronze/core-insights/teams/2026-07-28.parquet", frame(id=[3]))
+
+    spec = LoadSpec("ci_teams", "bronze/core-insights/teams/", selection="latest")
+
+    assert select_keys(store, spec) == [
+        "bronze/core-insights/teams/2026-07-28.parquet",
+        "bronze/core-insights/teams/archive-2024-2025.parquet",
+    ]
+
+
+def test_latest_still_takes_only_one_dated_snapshot(store) -> None:
+    """The reason `latest` exists: daily snapshots carry every active season,
+    so 365 copies of the same 800 rows is pure waste."""
+    for day in ("2026-07-26", "2026-07-27", "2026-07-28"):
+        put_parquet(store, f"bronze/core-insights/teams/{day}.parquet", frame(id=[1]))
 
     spec = LoadSpec("ci_teams", "bronze/core-insights/teams/", selection="latest")
 
     assert select_keys(store, spec) == ["bronze/core-insights/teams/2026-07-28.parquet"]
 
 
-def test_latest_falls_back_to_archive_when_only_option(store) -> None:
+def test_latest_with_only_an_archive(store) -> None:
     put_parquet(store, "bronze/core-insights/teams/archive-2024-2025.parquet", frame(id=[1]))
 
     spec = LoadSpec("ci_teams", "bronze/core-insights/teams/", selection="latest")
