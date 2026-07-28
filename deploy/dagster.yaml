@@ -1,0 +1,39 @@
+storage:
+  postgres:
+    postgres_db:
+      username:
+        env: PGUSER
+      password:
+        env: PGPASSWORD
+      hostname:
+        env: PGHOST
+      db_name:
+        env: PGDATABASE
+      port: 5432
+      params:
+        sslmode: require
+
+run_coordinator:
+  module: dagster.core.run_coordinator
+  class: QueuedRunCoordinator
+  config:
+    max_concurrent_runs: 4
+
+run_launcher:
+  module: dagster.core.launcher
+  class: DefaultRunLauncher
+
+
+compute_logs:
+  module: dagster.core.storage.noop_compute_log_manager
+  class: NoOpComputeLogManager
+
+
+telemetry:
+  enabled: false
+
+retention:
+  schedule:
+    purge_after_days: 90
+  sensor:
+    purge_after_days: 90

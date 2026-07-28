@@ -3,19 +3,30 @@
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'fpl-data-platform-summer-sandbar-3583'
+app = 'fpl-ingestion'
 primary_region = 'jnb'
 
 [build]
+  dockerfile = "Dockerfile"
+
+[processes]
+  web = "dagster-webserver -h 0.0.0.0 -p 8080 -m fpl_ingestion.definitions"
+  daemon = "dagster-daemon run -m fpl_ingestion.definitions"
+
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = 'stop'
+  auto_stop_machines = 'suspend'
   auto_start_machines = true
   min_machines_running = 0
-  processes = ['app']
+  processes = ['web']
 
 [[vm]]
-  memory = '1gb'
-  cpus = 1
-  memory_mb = 1024
+  processes = ["web"]
+  size = "shared-cpu-1x"
+  memory = "1gb"
+
+[[vm]]
+  processes = ["daemon"]
+  size = "shared-cpu-1x"
+  memory = "1gb"

@@ -30,17 +30,16 @@ from fpl_ingestion.client import make_client
 from fpl_ingestion.deadlines import read_deadlines
 from fpl_ingestion.heartbeat import ping
 from fpl_ingestion.mirror import mirror_masters, mirror_tarball
-from fpl_ingestion.resources import build_store
+from fpl_ingestion.resources import STORE, StoreResource
 from fpl_ingestion.schedule import decide
 
 daily = DailyPartitionsDefinition(start_date="2026-07-27")
 
 
 @op
-def capture_op(context: OpExecutionContext) -> None:
-    store = build_store()
+def capture_op(context: OpExecutionContext, store: StoreResource) -> None:
     with make_client(os.environ["USER_AGENT"]) as client:
-        result = capture(client, store)
+        result = capture(client, store.build())
 
     for name, key in result.stored.items():
         context.log.info("stored %s -> %s", name, key)
@@ -53,12 +52,11 @@ def capture_op(context: OpExecutionContext) -> None:
 
 
 @op
-def mirror_masters_op(context: OpExecutionContext) -> None:
-    store = build_store()
+def mirror_masters_op(context: OpExecutionContext, store: StoreResource) -> None:
     day = date.fromisoformat(context.run.tags.get("mirror/day", str(datetime.now(UTC).date())))
 
     with make_client(os.environ["USER_AGENT"]) as client:
-        result = mirror_masters(client, store, day)
+        result = mirror_masters(client, store.build(), day)
         context.log.info("mirror %s: %s", day, result)
         context.add_output_metadata(result)
 
@@ -67,12 +65,11 @@ def mirror_masters_op(context: OpExecutionContext) -> None:
 
 
 @op
-def mirror_tarball_op(context: OpExecutionContext) -> None:
-    store = build_store()
+def mirror_tarball_op(context: OpExecutionContext, store: StoreResource) -> None:
     day = datetime.now(UTC).date()
 
     with make_client(os.environ["USER_AGENT"]) as client:
-        result = mirror_tarball(client, store, day)
+        result = mirror_tarball(client, store.build(), day)
         context.log.info("tarball %s: %s", day, result)
         context.add_output_metadata(result)
 
@@ -116,12 +113,11 @@ def mirror_masters_schedule(context: ScheduleEvaluationContext):
 
 
 @sensor(job=capture_job, minimum_interval_seconds=60)
-def fpl_capture_sensor(context):
-    store = build_store()
+def fpl_capture_sensor(context, store: StoreResource):
     now = datetime.now(UTC)
 
     last = datetime.fromisoformat(context.cursor) if context.cursor else None
-    decision = decide(now, last, read_deadlines(store))
+    decision = decide(now, last, read_deadlines(store.build()))
 
     if not decision.capture:
         return SkipReason(decision.reason)
@@ -134,11 +130,10 @@ def fpl_capture_sensor(context):
     monitor_all_code_locations=True,
     default_status=DefaultSensorStatus.RUNNING,
 )
-def failure_alert_sensor(context: RunFailureSensorContext) -> None:
+def failure_alert_sensor(context: RunFailureSensorContext, store: StoreResource) -> None:
     """Route run failures by proximity to the next deadline"""
-    store = build_store()
     now = datetime.now(UTC)
-    severity = failure_severity(now, read_deadlines(store))
+    severity = failure_severity(now, read_deadlines(store.build()))
 
     job_name = context.dagster_run.job_name
     message = (
@@ -160,23 +155,24 @@ def failure_alert_sensor(context: RunFailureSensorContext) -> None:
     partitions_def=daily,
     freshness_policy=FreshnessPolicy.cron(
         deadline_cron="0 6 * * *",  # fresh by 06:00 UTC daily
-        lower_bound_delta=timedelta(hours=26),
+        lower_bound_delta=timedelta(hours=24),
     ),
 )
-def bootstrap_bronze(context) -> None:
-    meta = build_bootstrap_bronze(build_store(), date.fromisoformat(context.partition_key))
+def bootstrap_bronze(context, store: StoreResource) -> None:
+    meta = build_bootstrap_bronze(store.build(), date.fromisoformat(context.partition_key))
     context.add_output_metadata(meta)
 
 
 @asset_check(asset=bootstrap_bronze, blocking=False)
-def captured_near_deadline(context) -> AssetCheckResult:
-    store = build_store()
+def captured_near_deadline(context, store: StoreResource) -> AssetCheckResult:
+    s = store.build()
     day = date.fromisoformat(context.partition_key)
-    r = check_captured_near_deadline(store, day, read_deadlines(store))
+    r = check_captured_near_deadline(s, day, read_deadlines(s))
     return AssetCheckResult(passed=r.passed, severity=AssetCheckSeverity.ERROR, metadata=r.metadata)
 
 
 defs = Definitions(
+    resources={"store": STORE},
     jobs=[capture_job, mirror_masters_job, mirror_tarball_job],
     sensors=[fpl_capture_sensor, failure_alert_sensor],
     schedules=[mirror_masters_schedule, mirror_tarball_schedule],
