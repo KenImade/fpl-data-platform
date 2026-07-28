@@ -1,0 +1,30 @@
+version: 2
+
+models:
+  - name: stg_player_gameweek_stats
+    description: >
+      Discrete per-gameweek FPL fields. Grained at player x gameweek, NOT per
+      fixture — double gameweeks are aggregated. See ADR 0005.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [season, player_id, gameweek]
+    columns:
+      - name: player_id
+        tests: [not_null]
+      - name: gameweek
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+                max_value: 38
+      - name: minutes
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 270
+      - name: points
+        tests: [not_null]
