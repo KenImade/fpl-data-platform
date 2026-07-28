@@ -8,11 +8,13 @@ from dagster import (
     Definitions,
     OpExecutionContext,
     RunRequest,
+    ScheduleEvaluationContext,
     SkipReason,
     asset,
     asset_check,
     job,
     op,
+    schedule,
     sensor,
 )
 
@@ -21,6 +23,7 @@ from fpl_ingestion.capture import capture
 from fpl_ingestion.checks import check_captured_near_deadline
 from fpl_ingestion.client import make_client
 from fpl_ingestion.deadlines import read_deadlines
+from fpl_ingestion.mirror import mirror_masters, mirror_tarball
 from fpl_ingestion.resources import build_store
 from fpl_ingestion.schedule import decide
 
@@ -40,9 +43,67 @@ def capture_op(context: OpExecutionContext) -> None:
         raise RuntimeError(f"capture incomplete: {result.failed}")
 
 
+@op
+def mirror_masters_op(context: OpExecutionContext) -> None:
+    store = build_store()
+    day = date.fromisoformat(context.run.tags.get("mirror/day", str(datetime.now(UTC).date())))
+
+    with make_client(os.environ["USER_AGENT"]) as client:
+        result = mirror_masters(client, store, day)
+        context.log.info("mirror %s: %s", day, result)
+        context.add_output_metadata(result)
+
+    if result["failed"]:
+        context.log.warning("%d files failed to mirror", result["failed"])
+
+
+@op
+def mirror_tarball_op(context: OpExecutionContext) -> None:
+    store = build_store()
+    day = datetime.now(UTC).date()
+
+    with make_client(os.environ["USER_AGENT"]) as client:
+        result = mirror_tarball(client, store, day)
+        context.log.info("tarball %s: %s", day, result)
+        context.add_output_metadata(result)
+
+
+@job
+def mirror_tarball_job() -> None:
+    mirror_tarball_op()
+
+
+@job
+def mirror_masters_job() -> None:
+    mirror_masters_op()
+
+
 @job
 def capture_job() -> None:
     capture_op()
+
+
+@schedule(job=mirror_tarball_job, cron_schedule="0 20 * * 0", execution_timezone="UTC")
+def mirror_tarball_schedule():
+    """Weekly rather than daily, the tarball is large and
+    past gameweek snapshots don't change."""
+    return {}
+
+
+@schedule(
+    job=mirror_masters_job,
+    cron_schedule="0 19 * * *",
+    execution_timezone="UTC",
+)
+def mirror_masters_schedule(context: ScheduleEvaluationContext):
+    """Daily. Deliberately separate from the FPL capture sensor.
+
+    Sharing that cadence would mean 15-minute pulls during deadline
+    windows, roughly760 requests and several GB of downloads a day,
+    for a source that refreshes twice.
+    """
+    day = context.scheduled_execution_time.astimezone(UTC).date()
+    return {"tags": {"mirror/day": str(day)}}
 
 
 @sensor(job=capture_job, minimum_interval_seconds=60)
@@ -75,8 +136,9 @@ def captured_near_deadline(context) -> AssetCheckResult:
 
 
 defs = Definitions(
-    jobs=[capture_job],
+    jobs=[capture_job, mirror_masters_job, mirror_tarball_job],
     sensors=[fpl_capture_sensor],
+    schedules=[mirror_masters_schedule, mirror_tarball_schedule],
     assets=[bootstrap_bronze],
     asset_checks=[captured_near_deadline],
 )
