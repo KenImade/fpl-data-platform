@@ -198,6 +198,19 @@ def build_gameweek_table(
 
     out = pl.concat(frames, how="diagonal")
 
+    # Upstream files a small number of fixtures under two gameweek directories
+    # — a knockout placeholder populated with a real fixture's data. That
+    # duplicates every player row for the match. Keep the lowest gameweek,
+    # matching the dedupe in stg_matches.
+    if "match_id" in out.columns:
+        before = out.height
+        out = out.sort("_gameweek").unique(
+            subset=["match_id", "player_id"] if "player_id" in out.columns else ["match_id"],
+            keep="first",
+        )
+        if out.height < before:
+            log.warning("dropped %d duplicate rows in %s", before - out.height, table)
+
     buf = io.BytesIO()
     out.write_parquet(buf)
     store.put(bronze_key(table, scope), buf.getvalue(), overwrite=True, compress=False)
