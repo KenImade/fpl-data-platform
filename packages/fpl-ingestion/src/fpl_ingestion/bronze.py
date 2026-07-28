@@ -6,6 +6,7 @@ from datetime import date, datetime
 
 import polars as pl
 
+from fpl_ingestion.schemas import Element, polars_schema
 from fpl_ingestion.storage import Store
 
 
@@ -34,10 +35,8 @@ def build_bootstrap_bronze(store: Store, day: date) -> dict[str, int]:
         raise ValueError(f"no captures for {day}")
 
     buf = io.BytesIO()
-    # TODO(step 21): schema is inferred per partition, so an all-null column
-    # on one day types differently to a populated one on the next. Pydantic
-    # validation replaces this with a declared schema.
-    df = pl.DataFrame(rows)
+    schema = {"captured_at": pl.Datetime("us", "UTC"), **polars_schema(Element)}
+    df = pl.DataFrame(rows, schema=schema)
     df.write_parquet(buf)
     store.put(
         f"bronze/players/{day:%Y-%m-%d}.parquet",
