@@ -1,0 +1,12 @@
+fpl:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('PGHOST', 'localhost') }}"
+      port: "{{ env_var('PGPORT', 5432) | int }}"
+      user: "{{ env_var('PGUSER', 'fpl') }}"
+      password: "{{ env_var('PGPASSWORD', 'fpl') }}"
+      dbname: "{{ env_var('PGDATABASE', 'fpl') }}"
+      schema: analytics
+      threads: 4

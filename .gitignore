@@ -220,3 +220,7 @@ scratch/
 
 .vscode/
 .dagster/
+
+transform/logs/
+transform/target/
+transform/dbt_packages/

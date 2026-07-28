@@ -1,0 +1,27 @@
+version: 2
+
+sources:
+  - name: bronze
+    schema: bronze
+    description: >
+      Loaded by Dagster from parquet in object storage. Every column is TEXT
+      bronze lands raw and staging ows the type decisions, so they're reviewable
+      in one place rather than scattered through ingestion.
+    tables:
+      - name: fpl_players
+        description: bootstrap-static elements, every intra-day capture
+      - name: ci_player_gameweek_stats
+        description: >
+          Discrete per-gameweek FPL fields. Verified against differenced
+          cumulative totals (303/303 at GW11). Aggregagtes double gameweeks.
+      - name: ci_playermatchstats
+        description: >
+          Per-match performance. The only per-fixture grain available.
+          No competition column, joins via match_id to ci_matches.
+      - name: ci_matches
+        description: Fixtures with tournament, Elo, and team_code identifiers
+      - name: ci_playerstats
+        description: Cumulative season totals per gameweek, daily snapshots
+      - name: ci_players
+      - name: ci_teams
+      - name: ci_gameweek_summaries

@@ -5,3 +5,10 @@ S3_BUCKET=fpl-bronze
 DATABASE_URL=postgresql://fpl:fpl@localhost:5432/fpl
 USER_AGENT=fpl-api-project (contact: you@example.com)
 HEARTBEAT_URL=
+
+DBT_PROFILES_DIR=$PWD/transform/fpl
+PGHOST=
+PGPORT=
+PGUSER=
+PGPASSWORD=
+PGDATABASE=
