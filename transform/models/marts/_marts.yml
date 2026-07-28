@@ -1,0 +1,36 @@
+version: 2
+
+models:
+  - name: fct_player_gw
+    description: >
+      One row per player per gameweek per fixture. Per-fixture columns are
+      true at this grain; gw_* columns are populated only on the first
+      fixture of a gameweek (is_gw_primary) because they cannot be allocated
+      across a double gameweek. See ADR 0005.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [season, match_id, player_id]
+    columns:
+      - name: player_code
+        tests: [not_null]
+      - name: position
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['GKP', 'DEF', 'MID', 'FWD']
+      - name: is_gw_primary
+        tests: [not_null]
+      - name: minutes
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 120
+      - name: match_id
+        tests:
+          - relationships:
+              arguments:
+                to: ref('stg_matches')
+                field: match_id
