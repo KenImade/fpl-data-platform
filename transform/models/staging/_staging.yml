@@ -129,3 +129,29 @@ models:
         tests: [not_null]
       - name: gameweek
         tests: [not_null]
+  
+  - name: stg_fpl_players
+    description: >
+      Our own captures. The only source of deadline-precise price, ownership,
+      injury news and availability. Grain is (captured_at, player_id) —
+      every intra-day observation preserved.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [captured_at, player_id]
+    columns:
+      - name: player_code
+        tests: [not_null]
+      - name: position
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['GKP', 'DEF', 'MID', 'FWD']
+      - name: price_tenths
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 35
+                max_value: 200
