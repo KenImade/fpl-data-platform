@@ -84,3 +84,23 @@ models:
               arguments:
                 min_value: 0
                 max_value: 120
+  
+  - name: stg_players
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [season, player_code]
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [season, player_id]
+    columns:
+      - name: player_code
+        tests: [not_null]
+      - name: position
+        tests:
+          - not_null:
+              config:
+                where: "season != '2024-2025'"
+          - accepted_values:
+              arguments:
+                values: ['GKP', 'DEF', 'MID', 'FWD']
