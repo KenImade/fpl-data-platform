@@ -1,12 +1,15 @@
 import os
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 from dagster import (
     AssetCheckResult,
     AssetCheckSeverity,
     DailyPartitionsDefinition,
+    DefaultSensorStatus,
     Definitions,
+    FreshnessPolicy,
     OpExecutionContext,
+    RunFailureSensorContext,
     RunRequest,
     ScheduleEvaluationContext,
     SkipReason,
@@ -14,10 +17,12 @@ from dagster import (
     asset_check,
     job,
     op,
+    run_failure_sensor,
     schedule,
     sensor,
 )
 
+from fpl_ingestion.alerting import Severity, failure_severity
 from fpl_ingestion.bronze import build_bootstrap_bronze
 from fpl_ingestion.capture import capture
 from fpl_ingestion.checks import check_captured_near_deadline
@@ -125,7 +130,39 @@ def fpl_capture_sensor(context):
     return RunRequest(run_key=now.strftime("%Y%m%dT%H%M%S"))
 
 
-@asset(partitions_def=daily)
+@run_failure_sensor(
+    monitor_all_code_locations=True,
+    default_status=DefaultSensorStatus.RUNNING,
+)
+def failure_alert_sensor(context: RunFailureSensorContext) -> None:
+    """Route run failures by proximity to the next deadline"""
+    store = build_store()
+    now = datetime.now(UTC)
+    severity = failure_severity(now, read_deadlines(store))
+
+    job_name = context.dagster_run.job_name
+    message = (
+        f"[{severity.upper()}] {job_name} failed\n"
+        f"{context.failure_event.message}\n"
+        f"run: {context.dagster_run.run_id}"
+    )
+
+    if severity is Severity.PAGE:
+        ping("/fail")
+        context.log.error(message)
+    elif severity is Severity.NOTIFY:
+        context.log.warning(message)
+    else:
+        context.log.info(message)
+
+
+@asset(
+    partitions_def=daily,
+    freshness_policy=FreshnessPolicy.cron(
+        deadline_cron="0 6 * * *",  # fresh by 06:00 UTC daily
+        lower_bound_delta=timedelta(hours=26),
+    ),
+)
 def bootstrap_bronze(context) -> None:
     meta = build_bootstrap_bronze(build_store(), date.fromisoformat(context.partition_key))
     context.add_output_metadata(meta)
@@ -141,7 +178,7 @@ def captured_near_deadline(context) -> AssetCheckResult:
 
 defs = Definitions(
     jobs=[capture_job, mirror_masters_job, mirror_tarball_job],
-    sensors=[fpl_capture_sensor],
+    sensors=[fpl_capture_sensor, failure_alert_sensor],
     schedules=[mirror_masters_schedule, mirror_tarball_schedule],
     assets=[bootstrap_bronze],
     asset_checks=[captured_near_deadline],
