@@ -23,6 +23,7 @@ from fpl_ingestion.capture import capture
 from fpl_ingestion.checks import check_captured_near_deadline
 from fpl_ingestion.client import make_client
 from fpl_ingestion.deadlines import read_deadlines
+from fpl_ingestion.heartbeat import ping
 from fpl_ingestion.mirror import mirror_masters, mirror_tarball
 from fpl_ingestion.resources import build_store
 from fpl_ingestion.schedule import decide
@@ -40,7 +41,10 @@ def capture_op(context: OpExecutionContext) -> None:
         context.log.info("stored %s -> %s", name, key)
 
     if not result.ok:
+        ping("/fail")
         raise RuntimeError(f"capture incomplete: {result.failed}")
+
+    ping()
 
 
 @op
