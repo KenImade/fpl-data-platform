@@ -196,7 +196,9 @@ def unknown_fields(model: BaseModel) -> set[str]:
 
 
 def novel_fields(model: BaseModel) -> set[str]:
-    """Fields we've never seen before. Undeclared-but-known fields are
-    deliberately excluded — the signal is a NEW field appearing, not the
-    standing set we've chosen not to model yet."""
-    return set(model.model_extra or {}) - set(model.model_fields) - KNOWN_UNMAPPED
+    """Fields we've never seen before.
+
+    Undeclared-but-known fields are deliberately excluded — the signal is a
+    NEW field appearing, not the standing set we've chosen not to model.
+    """
+    return set(model.model_extra or {}) - set(type(model).model_fields) - KNOWN_UNMAPPED
