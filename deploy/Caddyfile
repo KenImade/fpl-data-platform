@@ -1,0 +1,27 @@
+{
+    email {$ACME_EMAIL}
+}
+
+{$API_DOMAIN} {
+    encode gzip zstd
+
+    reverse_proxy api:8000 {
+        health_url /health
+        health_interval 15s
+        lb_policy round_robin
+    }
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        -Server
+    }
+}
+
+{$DAGSTER_DOMAIN} {
+    basic_auth {
+        admin {$DAGSTER_BASIC_AUTH}
+    }
+
+    reverse_proxy dagster-web:3000
+}
