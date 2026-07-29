@@ -38,6 +38,6 @@ async def health_db() -> dict[str, object]:
     monitoring should alert on.
     """
     marts = await db.fetch_value(
-        "SELECT COUNT(*) FROM information_schema.tables " "WHERE table_schema = 'analytics_marts'"
+        "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'analytics_marts'"
     )
     return {"status": "ok", "marts": marts}
