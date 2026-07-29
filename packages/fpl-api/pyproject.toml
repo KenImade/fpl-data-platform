@@ -8,6 +8,7 @@ dependencies = [
     "fastapi>=0.140.5",
     "uvicorn>=0.51.0",
     "fpl-core",
+    "asyncpg>=0.31.0",
 ]
 
 [dependency-groups]

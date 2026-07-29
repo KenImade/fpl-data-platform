@@ -58,3 +58,6 @@ seed:
     uv run dagster job execute -m fpl_ingestion.definitions -j fpl_bronze_job \
         --tags '{"dagster/partition": "'$(date -u +%F)'"}'
     uv run dagster job execute -m fpl_ingestion.definitions -j load_job
+
+_api_role:
+    docker compose exec -T postgres psql -U fpl -d fpl -f /dev/stdin < deploy/api_role.sql || true
