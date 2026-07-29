@@ -29,6 +29,7 @@ lint:
 
 fmt:
     uv run ruff format .
+    uv run ruff check --fix .
 
 clean:
     docker compose down -v

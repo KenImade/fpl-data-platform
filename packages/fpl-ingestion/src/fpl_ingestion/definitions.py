@@ -1,4 +1,6 @@
+from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
+from typing import Any
 
 from dagster import (
     AssetCheckExecutionContext,
@@ -537,7 +539,7 @@ def failure_alert_sensor(context: RunFailureSensorContext, store: StoreResource)
     manifest=dbt_project.manifest_path,
     dagster_dbt_translator=FplDbtTranslator(),
 )
-def dbt_models(context: AssetExecutionContext, dbt: DbtCliResource):
+def dbt_models(context: AssetExecutionContext, dbt: DbtCliResource) -> Iterator[Any]:
     yield from dbt.cli(["build"], context=context).stream()
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import httpx
@@ -38,7 +39,7 @@ def fetch(
     url: str,
     *,
     backoffs: tuple[float, ...] = (1.0, 4.0, 16.0),
-    sleep=time.sleep,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> Response:
     last: Exception | None = None
 

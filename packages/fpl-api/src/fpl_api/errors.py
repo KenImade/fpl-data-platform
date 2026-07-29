@@ -21,12 +21,14 @@ import logging
 import time
 import uuid
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.responses import Response
 
 from fpl_api.logging import request_id_var
 
@@ -61,7 +63,7 @@ def _problem_response(
     title: str,
     detail: str | None = None,
     problem_type: str = "about:blank",
-    extra: dict | None = None,
+    extra: dict[str, Any] | None = None,
     headers: dict[str, str] | None = None,
 ) -> JSONResponse:
     request_id = request_id_var.get()
@@ -94,7 +96,9 @@ def register(app: FastAPI) -> None:
     """Attach middleware and exception handlers. Call once at startup"""
 
     @app.middleware("http")
-    async def request_context(request: Request, call_next: Callable[[Request], Awaitable]):
+    async def request_context(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
         """Assign a request id, time the request, log the outcome.
 
         An inbound X-Request-ID is honoured so a caller can correlate

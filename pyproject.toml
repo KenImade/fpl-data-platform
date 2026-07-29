@@ -20,12 +20,38 @@ members = [
 fpl-core = { workspace = true }
 fpl-api = { workspace = true }
 
+
+# ---------------------------------------------------------------------------
+# ruff
+# ---------------------------------------------------------------------------
+
 [tool.ruff]
 line-length = 100
 target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency injection requires these in argument defaults. B008
+# exists for mutable defaults evaluated once at import; these are sentinels
+# FastAPI resolves per request, and "fixing" them would break the framework.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Body",
+    "fastapi.Header",
+]
+
+
+# ---------------------------------------------------------------------------
+# mypy
+# ---------------------------------------------------------------------------
+#
+# Not strict globally. Strict typing pays for itself on shared domain logic
+# that every other package imports; on framework glue it mostly demands
+# annotations that satisfy the checker without catching anything.
 
 [tool.mypy]
 python_version = "3.13"
@@ -44,24 +70,24 @@ files = [
     "packages/fpl-optimiser/src",
 ]
 
-# Third-party packages without type information. Not our problem to fix.
+# Third-party packages shipping no type information. Not ours to fix.
 [[tool.mypy.overrides]]
-module = ["boto3.*", "botocore.*", "adbc_driver_postgresql.*"]
+module = [
+    "boto3.*",
+    "botocore.*",
+    "adbc_driver_postgresql.*",
+    "asyncpg.*",
+]
 ignore_missing_imports = true
 
-# Strict on the shared domain logic: rulesets, scoring, money, identity.
-# A bug here propagates into every other package.
+# Strict on the shared domain: rulesets, scoring, money, identity. A bug
+# here propagates into ingestion, the API, and eventually the models.
 [[tool.mypy.overrides]]
 module = "fpl_core.*"
 strict = true
 
-# Relaxed at the Dagster boundary. Decorators rewrite these signatures, so
-# annotating them satisfies the checker without catching anything real.
-[[tool.mypy.overrides]]
-module = ["fpl_ingestion.definitions", "fpl_ingestion.resources"]
-disallow_untyped_defs = false
-disallow_any_generics = false
-
+# Relaxed across ingestion. Dagster's decorators rewrite the signatures of
+# every asset, op and sensor, so annotations there are ceremony.
 [[tool.mypy.overrides]]
 module = "fpl_ingestion.*"
 disallow_untyped_defs = false
@@ -69,29 +95,34 @@ disallow_untyped_calls = false
 disallow_any_generics = false
 ignore_missing_imports = true
 
+# Relaxed only where FastAPI does the same thing — middleware signatures and
+# app wiring. The routers, db and auth stay checked: those are ordinary code
+# and the annotations earn their keep.
+[[tool.mypy.overrides]]
+module = ["fpl_api.errors", "fpl_api.main"]
+disallow_untyped_defs = false
+disallow_any_generics = false
+
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+
 [tool.pytest.ini_options]
 markers = ["integration: requires local Compose services"]
 asyncio_mode = "auto"
+# asyncpg connections are bound to the event loop that created them, so a
+# session-scoped pool needs a session-scoped loop. Without both lines, every
+# test after the first gets a pool belonging to a closed loop.
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
 
-[tool.ruff.lint.flake8-bugbear]
-# FastAPI's dependency injection requires Depends() in argument defaults.
-# The B008 rule exists for mutable defaults evaluated at import; these are
-# sentinels FastAPI resolves per request.
-extend-immutable-calls = [
-    "fastapi.Depends",
-    "fastapi.Query",
-    "fastapi.Path",
-    "fastapi.Body",
-    "fastapi.Header",
-]
 
 [dependency-groups]
 dev = [
-    "httpx2>=2.9.1",
     "mypy>=1.13",
     "pre-commit>=4.6.1",
     "pytest>=9.1.1",
+    "pytest-asyncio>=0.24",
     "ruff>=0.16.0",
 ]

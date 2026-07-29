@@ -67,4 +67,4 @@ async def fetch_value(query: str, *args: Any) -> Any:
 
 async def execute(query: str, *args: Any) -> str:
     async with pool().acquire() as conn:
-        return await conn.execute(query, *args)
+        return str(await conn.execute(query, *args))
