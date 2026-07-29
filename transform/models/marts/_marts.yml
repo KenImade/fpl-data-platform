@@ -180,3 +180,19 @@ models:
                 config:
                   where: "is_usable"
                   severity: warn
+  
+  - name: fct_player_snapshot
+    description: >
+      Player state as at each gameweek deadline. THE point-in-time boundary —
+      every predictive feature reads from here. A row exists only if captured
+      strictly before its deadline, so leakage is structurally unavailable
+      rather than merely avoided.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [snapshot_id, player_id]
+    columns:
+      - name: snapshot_id
+        tests: [not_null]
+      - name: price_tenths
+        tests: [not_null]
