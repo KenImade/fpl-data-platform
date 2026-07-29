@@ -196,3 +196,58 @@ models:
         tests: [not_null]
       - name: price_tenths
         tests: [not_null]
+
+  - name: dim_team
+    description: >
+      One row per club per season. The API's read surface for teams — in
+      marts rather than the API reading stg_teams, so "the API reads marts"
+      stays a simple rule.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [season, team_code]
+    columns:
+      - name: team_name
+        tests: [not_null]
+      - name: matches_played
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 38
+                config:
+                  where: "matches_played is not null"
+
+  - name: dim_gameweek
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [season, gameweek]
+    columns:
+      - name: deadline_utc
+        tests: [not_null]
+      - name: fixture_count
+        description: >
+          League matches. Not always 10 — rounds get rescheduled around cup
+          and European commitments, so 7 and 13 both occur legitimately.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+                max_value: 15
+                config:
+                  where: "fixture_count is not null"
+
+  - name: dim_player
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [season, player_id]
+    columns:
+      - name: player_code
+        tests: [not_null]
+      - name: position
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['GKP', 'DEF', 'MID', 'FWD']

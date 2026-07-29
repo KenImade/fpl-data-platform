@@ -38,3 +38,4 @@ models:
     marts:
       +materialized: table
       +schema: marts
+      +post-hook: "grant select on {{ this }} to fpl_api"
