@@ -165,18 +165,18 @@ def _unwrap_optional(annotation: object) -> object:
     return annotation
 
 
-def polars_schema(model: type[BaseModel]) -> dict[str, pl.DataType]:
+def polars_schema(model: type[BaseModel]) -> dict[str, pl.DataType | type[pl.DataType]]:
     """Explicit polars schema derived from a Pydantic model.
 
     Deriving rather than hand-writing means the two cannot drift: adding a
     field to the model automatically adds it to the schema, and adding one
     with an unmapped type fails immediately and by name.
     """
-    schema: dict[str, pl.DataType] = {}
+    schema: dict[str, pl.DataType | type[pl.DataType]] = {}
     for name, field in model.model_fields.items():
         annotation = _unwrap_optional(field.annotation)
         try:
-            schema[name] = _POLARS_TYPES[annotation]  # type: ignore[index]
+            schema[name] = _POLARS_TYPES[annotation]
         except KeyError:
             raise TypeError(
                 f"{model.__name__}.{name}: no polars type mapped for {annotation}. "

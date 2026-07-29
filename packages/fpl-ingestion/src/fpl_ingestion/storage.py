@@ -4,7 +4,7 @@ import gzip
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 log = logging.getLogger(__name__)
 
@@ -108,7 +108,7 @@ class S3Store:
 
     DELETE_BATCH = 1000  # S3 API limit per DeleteObjects call
 
-    def __init__(self, client, bucket: str) -> None:
+    def __init__(self, client: Any, bucket: str) -> None:
         self.client = client
         self.bucket = bucket
 

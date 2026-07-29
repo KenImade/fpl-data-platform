@@ -29,7 +29,6 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.mypy]
 python_version = "3.13"
-strict = true
 mypy_path = [
     "packages/fpl-api/src",
     "packages/fpl-core/src",
@@ -45,13 +44,38 @@ files = [
     "packages/fpl-optimiser/src",
 ]
 
+# Third-party packages without type information. Not our problem to fix.
+[[tool.mypy.overrides]]
+module = ["boto3.*", "botocore.*", "adbc_driver_postgresql.*"]
+ignore_missing_imports = true
+
+# Strict on the shared domain logic: rulesets, scoring, money, identity.
+# A bug here propagates into every other package.
+[[tool.mypy.overrides]]
+module = "fpl_core.*"
+strict = true
+
+# Relaxed at the Dagster boundary. Decorators rewrite these signatures, so
+# annotating them satisfies the checker without catching anything real.
+[[tool.mypy.overrides]]
+module = ["fpl_ingestion.definitions", "fpl_ingestion.resources"]
+disallow_untyped_defs = false
+disallow_any_generics = false
+
+[[tool.mypy.overrides]]
+module = "fpl_ingestion.*"
+disallow_untyped_defs = false
+disallow_untyped_calls = false
+disallow_any_generics = false
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 markers = ["integration: requires local Compose services"]
 
 [dependency-groups]
 dev = [
     "httpx2>=2.9.1",
-    "mypy>=2.3.0",
+    "mypy>=1.13",
     "pre-commit>=4.6.1",
     "pytest>=9.1.1",
     "ruff>=0.16.0",

@@ -6,6 +6,7 @@ from dagster import (
     AssetCheckSeverity,
     AssetDep,
     AssetExecutionContext,
+    AssetsDefinition,
     ConfigurableResource,
     DailyPartitionsDefinition,
     DefaultScheduleStatus,
@@ -29,6 +30,7 @@ from dagster import (
     run_failure_sensor,
     sensor,
 )
+from dagster_dbt import DbtCliResource, dbt_assets
 
 from fpl_ingestion.alerting import Severity, failure_severity
 from fpl_ingestion.bronze import build_bootstrap_bronze
@@ -41,6 +43,7 @@ from fpl_ingestion.core_insights import (
     build_archive,
     build_daily,
 )
+from fpl_ingestion.dbt import FplDbtTranslator, dbt_project
 from fpl_ingestion.deadlines import read_deadlines
 from fpl_ingestion.heartbeat import ping
 from fpl_ingestion.load import SPECS, LoadSpec, ensure_schema, load_table
@@ -121,7 +124,9 @@ def capture_job() -> None:
     minimum_interval_seconds=60,
     default_status=DefaultSensorStatus.RUNNING,
 )
-def fpl_capture_sensor(context: SensorEvaluationContext, store: StoreResource):
+def fpl_capture_sensor(
+    context: SensorEvaluationContext, store: StoreResource
+) -> RunRequest | SkipReason:
     """Gated on elapsed time since the last capture, never wall-clock minute.
 
     A delayed tick captures late rather than not at all. The cursor is
@@ -227,7 +232,7 @@ def captured_near_deadline(
     return AssetCheckResult(passed=r.passed, severity=AssetCheckSeverity.ERROR, metadata=r.metadata)
 
 
-def _ci_daily_asset(table: str):
+def _ci_daily_asset(table: str) -> AssetsDefinition:
     """One asset per Core Insights daily master table.
 
     `table` is a parameter of this factory, so each call binds its own. Note
@@ -248,7 +253,7 @@ def _ci_daily_asset(table: str):
     return _asset
 
 
-def _ci_archive_asset(table: str):
+def _ci_archive_asset(table: str) -> AssetsDefinition:
     @asset(
         name=f"ci_{table}_archive",
         group_name="bronze_core_insights",
@@ -260,7 +265,7 @@ def _ci_archive_asset(table: str):
     return _asset
 
 
-def _tarball_asset(table: str, scope: Scope):
+def _tarball_asset(table: str, scope: Scope) -> AssetsDefinition:
     @asset(
         name=f"ci_{table}_{scope}s",
         group_name="bronze_core_insights",
@@ -272,7 +277,7 @@ def _tarball_asset(table: str, scope: Scope):
     return _asset
 
 
-def _load_asset(spec: LoadSpec, deps: list):
+def _load_asset(spec: LoadSpec, deps: list) -> AssetsDefinition:
     """Bronze parquet -> bronze.{table} in Postgres.
 
     The boundary between Dagster and dbt. Everything above this line is
@@ -296,16 +301,22 @@ def _load_asset(spec: LoadSpec, deps: list):
     return _asset
 
 
-ci_daily_assets = [_ci_daily_asset(t) for t in DAILY_TABLES]
-ci_archive_assets = [_ci_archive_asset(t) for t in ARCHIVE_TABLES]
-tarball_assets = [_tarball_asset(t, s) for t, s in BUILDS]
+ci_daily_assets: list[AssetsDefinition] = [_ci_daily_asset(t) for t in DAILY_TABLES]
+ci_archive_assets: list[AssetsDefinition] = [_ci_archive_asset(t) for t in ARCHIVE_TABLES]
+tarball_assets: list[AssetsDefinition] = [_tarball_asset(t, s) for t, s in BUILDS]
 
-ci_daily_by_table = dict(zip(DAILY_TABLES, ci_daily_assets, strict=True))
-ci_archive_by_table = dict(zip(ARCHIVE_TABLES, ci_archive_assets, strict=True))
-tarball_by_key = {f"{t}_{s}": a for (t, s), a in zip(BUILDS, tarball_assets, strict=True)}
+ci_daily_by_table: dict[str, AssetsDefinition] = dict(
+    zip(DAILY_TABLES, ci_daily_assets, strict=True)
+)
+ci_archive_by_table: dict[str, AssetsDefinition] = dict(
+    zip(ARCHIVE_TABLES, ci_archive_assets, strict=True)
+)
+tarball_by_key: dict[str, AssetsDefinition] = {
+    f"{t}_{s}": a for (t, s), a in zip(BUILDS, tarball_assets, strict=True)
+}
 
 
-def _last(asset_def) -> AssetDep:
+def _last(asset_def: AssetsDefinition) -> AssetDep:
     """Depend on the most recent partition, not every partition.
 
     Dagster's default for partitioned -> unpartitioned is AllPartitionMapping,
@@ -349,9 +360,9 @@ LOAD_DEPS: dict[str, list] = {
     ],
 }
 
-load_assets = [_load_asset(s, LOAD_DEPS[s.table]) for s in SPECS]
+load_assets: list[AssetsDefinition] = [_load_asset(s, LOAD_DEPS[s.table]) for s in SPECS]
 
-ALL_ASSETS = [
+ALL_ASSETS: list[AssetsDefinition] = [
     ci_masters_raw,
     ci_archive_raw,
     ci_tarball_raw,
@@ -470,10 +481,23 @@ def failure_alert_sensor(context: RunFailureSensorContext, store: StoreResource)
 
 
 # ---------------------------------------------------------------------------
+@dbt_assets(
+    manifest=dbt_project.manifest_path,
+    dagster_dbt_translator=FplDbtTranslator(),
+)
+def dbt_models(context: AssetExecutionContext, dbt: DbtCliResource):
+    yield from dbt.cli(["build"], context=context).stream()
 
+
+# ---------------------------------------------------------------------------
 defs = Definitions(
-    resources={"store": STORE, "postgres": POSTGRES, "fpl": FPL_CLIENT},
-    assets=ALL_ASSETS,
+    resources={
+        "store": STORE,
+        "postgres": POSTGRES,
+        "fpl": FPL_CLIENT,
+        "dbt": DbtCliResource(project_dir=dbt_project),
+    },
+    assets=[*ALL_ASSETS, dbt_models],
     asset_checks=[captured_near_deadline],
     jobs=[
         capture_job,
