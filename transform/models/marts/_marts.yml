@@ -178,8 +178,5 @@ models:
                 min_value: 0
                 max_value: 3
                 config:
-                  # Under 0.25 is the design target; over 3 means the sensor
-                  # missed its tight window entirely. Warn rather than error
-                  # — the fact is worth surfacing but the data is still valid.
-                  where: "has_snapshot"
+                  where: "is_usable"
                   severity: warn

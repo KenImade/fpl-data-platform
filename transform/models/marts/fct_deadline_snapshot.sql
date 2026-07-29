@@ -59,7 +59,14 @@ select
                                                     as hours_before_deadline,
 
     snapshot_at is not null                         as has_snapshot,
+    
+    current_timestamp                               as built_at,
 
-    current_timestamp                               as built_at
+    -- A snapshot is only meaningful if it's reasonably close to the deadline.
+    -- Anything older than a week predates team news, price movement and
+    -- probably the fixture itself, so it is a placeholder rather than a
+    -- usable feature source.
+    snapshot_at is not null
+        and (deadline_utc - snapshot_at) < interval '7 days'  as is_usable
 
 from resolved
