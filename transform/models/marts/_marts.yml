@@ -162,3 +162,24 @@ models:
                   # yet fixed at source.
                   where: "is_league and days_since_last_match is not null"
                   severity: warn
+  
+  - name: fct_deadline_snapshot
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [snapshot_id]
+    columns:
+      - name: snapshot_id
+        tests: [not_null]
+      - name: hours_before_deadline
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 3
+                config:
+                  # Under 0.25 is the design target; over 3 means the sensor
+                  # missed its tight window entirely. Warn rather than error
+                  # — the fact is worth surfacing but the data is still valid.
+                  where: "has_snapshot"
+                  severity: warn
