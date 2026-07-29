@@ -62,6 +62,7 @@ def _problem_response(
     detail: str | None = None,
     problem_type: str = "about:blank",
     extra: dict | None = None,
+    headers: dict[str, str] | None = None,
 ) -> JSONResponse:
     request_id = request_id_var.get()
 
@@ -77,11 +78,15 @@ def _problem_response(
     if extra:
         body.update(extra)
 
+    response_headers = dict(headers or {})
+    if request_id:
+        response_headers[REQUEST_ID_HEADER] = request_id
+
     return JSONResponse(
         status_code=status_code,
         content=body,
         media_type=PROBLEM_CONTENT_TYPE,
-        headers={REQUEST_ID_HEADER: request_id} if request_id else None,
+        headers=response_headers or None,
     )
 
 
@@ -136,6 +141,7 @@ def register(app: FastAPI) -> None:
             request,
             status_code=exc.status_code,
             title=exc.detail if isinstance(exc.detail, str) else "Request failed",
+            headers=dict(exc.headers) if exc.headers else None,
         )
 
     @app.exception_handler(RequestValidationError)

@@ -8,11 +8,16 @@ didn't ask about is worse than making them say.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fpl_api import db
+from fpl_api.deps import authenticated
 from fpl_api.schemas.teams import Team
 
-router = APIRouter(prefix="/v1/teams", tags=["teams"])
+router = APIRouter(
+    prefix="/v1/teams",
+    tags=["teams"],
+    dependencies=[Depends(authenticated)],
+)
 
 _SELECT = """
     SELECT

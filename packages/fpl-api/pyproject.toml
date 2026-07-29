@@ -9,12 +9,14 @@ dependencies = [
     "uvicorn>=0.51.0",
     "fpl-core",
     "asyncpg>=0.31.0",
+    "redis>=8.0.1",
 ]
 
 [dependency-groups]
 dev = [
     "httpx>=0.28.1",
     "httpx2>=2.9.1",
+    "pytest-asyncio>=1.4.0",
 ]
 
 [build-system]

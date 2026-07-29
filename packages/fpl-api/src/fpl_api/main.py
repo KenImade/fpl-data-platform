@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from fpl_api import VERSION, db, errors
+from fpl_api import VERSION, db, errors, ratelimit
 from fpl_api.logging import configure as configure_logging
 from fpl_api.routers import fixtures, gameweeks, health, players, teams
 
@@ -13,9 +13,11 @@ configure_logging()
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     await db.connect()
+    await ratelimit.connect()
     try:
         yield
     finally:
+        await ratelimit.disconnect()
         await db.disconnect()
 
 

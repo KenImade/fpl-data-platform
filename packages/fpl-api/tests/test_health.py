@@ -1,7 +1,8 @@
 from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
-from fpl_api.main import VERSION, app
+from fpl_api import VERSION
+from fpl_api.main import app
 
 client = TestClient(app)
 

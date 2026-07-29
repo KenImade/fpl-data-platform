@@ -4,11 +4,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fpl_api import db
+from fpl_api.deps import authenticated
 from fpl_api.schemas.gameweeks import Gameweek
 
-router = APIRouter(prefix="/v1/gameweeks", tags=["gameweeks"])
+router = APIRouter(
+    prefix="/v1/gameweeks",
+    tags=["gameweeks"],
+    dependencies=[Depends(authenticated)],
+)
 
 _COLUMNS = """
     season, gameweek, gameweek_name, deadline_utc,

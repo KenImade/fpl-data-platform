@@ -15,11 +15,16 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fpl_api import db
+from fpl_api.deps import authenticated
 from fpl_api.schemas.fixtures import Fixture
 
-router = APIRouter(prefix="/v1/fixtures", tags=["fixtures"])
+router = APIRouter(
+    prefix="/v1/fixtures",
+    tags=["fixtures"],
+    dependencies=[Depends(authenticated)],
+)
 
 _SELECT = """
     select

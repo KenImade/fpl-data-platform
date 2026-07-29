@@ -13,11 +13,16 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fpl_api import db
+from fpl_api.deps import authenticated
 from fpl_api.schemas.players import Player, PlayerPage
 
-router = APIRouter(prefix="/v1/players", tags=["players"])
+router = APIRouter(
+    prefix="/v1/players",
+    tags=["players"],
+    dependencies=[Depends(authenticated)],
+)
 
 _COLUMNS = """
     season, player_id, player_code, team_code, team_name, team_short,
