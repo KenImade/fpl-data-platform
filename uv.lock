@@ -677,15 +677,11 @@ dependencies = [
     { name = "dagster-dbt" },
     { name = "dagster-postgres" },
     { name = "dagster-webserver" },
+    { name = "dbt-core" },
+    { name = "dbt-postgres" },
     { name = "httpx" },
     { name = "polars" },
     { name = "pyarrow" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "dbt-core" },
-    { name = "dbt-postgres" },
 ]
 
 [package.metadata]
@@ -697,16 +693,15 @@ requires-dist = [
     { name = "dagster-dbt", specifier = "~=0.29.15" },
     { name = "dagster-postgres", specifier = ">=0.29.15" },
     { name = "dagster-webserver", specifier = ">=1.13.15" },
+    { name = "dbt-core", specifier = ">=1.11,<1.12" },
+    { name = "dbt-postgres", specifier = ">=1.11,<1.12" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "polars", specifier = ">=1.43.1" },
     { name = "pyarrow", specifier = ">=25.0.0" },
 ]
 
 [package.metadata.requires-dev]
-dev = [
-    { name = "dbt-core", specifier = ">=1.11,<1.12" },
-    { name = "dbt-postgres", specifier = ">=1.11,<1.12" },
-]
+dev = []
 
 [[package]]
 name = "fpl-modelling"

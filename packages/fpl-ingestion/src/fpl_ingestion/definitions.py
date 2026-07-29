@@ -7,6 +7,7 @@ from dagster import (
     AssetDep,
     AssetExecutionContext,
     AssetsDefinition,
+    AssetSelection,
     ConfigurableResource,
     DailyPartitionsDefinition,
     DefaultScheduleStatus,
@@ -19,15 +20,16 @@ from dagster import (
     RunFailureSensorContext,
     RunRequest,
     ScheduleDefinition,
+    ScheduleEvaluationContext,
     SensorEvaluationContext,
     SkipReason,
     asset,
     asset_check,
-    build_schedule_from_partitioned_job,
     define_asset_job,
     job,
     op,
     run_failure_sensor,
+    schedule,
     sensor,
 )
 from dagster_dbt import DbtCliResource, dbt_assets
@@ -402,49 +404,99 @@ ci_snapshot_job = define_asset_job(
     ],
 )
 
-load_job = define_asset_job("load_job", selection=load_assets)
+load_job = define_asset_job(
+    "load_job",
+    selection=AssetSelection.assets(*load_assets).downstream(),
+)
 
 # ---------------------------------------------------------------------------
 # schedules
 # ---------------------------------------------------------------------------
 #
+# All times UTC, sequenced so each layer runs after the one it reads from.
+#
 # default_status=RUNNING throughout: a fresh deploy or a wiped instance comes
-# up automating itself rather than silently idle until someone remembers to
-# flip switches in the UI.
+# up automating itself rather than sitting idle until someone remembers to
+# flip switches in the UI. Automation state belongs in the deployment, not in
+# a database someone clicked once.
+#
+# ---------------------------------------------------------------------------
+# On partition targeting
+# ---------------------------------------------------------------------------
+#
+# The partitions definitions carry end_offset=1, which makes TODAY's partition
+# addressable. That is necessary — without it the newest partition is always
+# yesterday's, and nothing landing today could be materialised until tomorrow,
+# which makes a cold-start rebuild impossible to verify.
+#
+# But it means build_schedule_from_partitioned_job would target today: a day
+# still accumulating captures, built partial and never revisited. Every
+# partition would ship incomplete.
+#
+# So these are hand-written and explicitly target YESTERDAY, running shortly
+# after midnight UTC when that day is closed. The cost is that bronze lags the
+# raw captures by up to 24 hours; the raw layer is authoritative and always
+# current, so nothing is lost.
 
-fpl_bronze_schedule = build_schedule_from_partitioned_job(
-    fpl_bronze_job,
-    hour_of_day=19,
-    minute_of_hour=30,
+
+@schedule(
+    job=ci_daily_job,
+    cron_schedule="0 1 * * *",
+    execution_timezone="UTC",
     default_status=DefaultScheduleStatus.RUNNING,
 )
+def ci_daily_schedule(context: ScheduleEvaluationContext) -> RunRequest:
+    """Mirror and build the Core Insights daily masters for the day just
+    completed.
 
-# Fetch and build the daily masters together — the raw asset is upstream of
-# the bronze ones in the same job, so ordering is the graph's problem.
-ci_daily_schedule = build_schedule_from_partitioned_job(
-    ci_daily_job,
-    hour_of_day=19,
-    minute_of_hour=0,
+    The raw fetch is upstream of the bronze assets within the same job, so
+    ordering is the asset graph's problem rather than the schedule's.
+    """
+    day = context.scheduled_execution_time.astimezone(UTC).date() - timedelta(days=1)
+    return RunRequest(partition_key=str(day))
+
+
+@schedule(
+    job=fpl_bronze_job,
+    cron_schedule="30 1 * * *",
+    execution_timezone="UTC",
     default_status=DefaultScheduleStatus.RUNNING,
 )
+def fpl_bronze_schedule(context: ScheduleEvaluationContext) -> RunRequest:
+    """Build yesterday's FPL capture partition, once every capture for that
+    day has landed.
+
+    Captures run every three hours, tightening to fifteen minutes before a
+    deadline, so a day is only complete after it ends.
+    """
+    day = context.scheduled_execution_time.astimezone(UTC).date() - timedelta(days=1)
+    return RunRequest(partition_key=str(day))
+
 
 ci_snapshot_schedule = ScheduleDefinition(
     job=ci_snapshot_job,
-    cron_schedule="0 20 * * 0",  # Sundays
+    # Sundays, after the weekly tarball mirror. The archive and tarball assets
+    # are self-healing — they fetch when nothing exists at all — so a missed
+    # week recovers on the next tick rather than needing intervention.
+    cron_schedule="0 2 * * 0",
     execution_timezone="UTC",
     default_status=DefaultScheduleStatus.RUNNING,
 )
 
-# Daily, though ci_snapshot_job only runs on Sundays — so the tarball-derived
-# tables reload identical parquet six days a week. Harmless under replace
-# semantics and cheap at this volume.
+
+# Loads and everything downstream of them: staging views, marts, and their
+# tests. `.downstream()` rather than an explicit list so a new dbt model is
+# picked up without the selection needing to change.
 load_schedule = ScheduleDefinition(
     job=load_job,
-    cron_schedule="0 21 * * *",
+    # After both partitioned jobs above. Daily, though ci_snapshot_job runs
+    # only on Sundays — so the tarball-derived tables reload identical parquet
+    # six days a week. Harmless under replace semantics and cheap at this
+    # volume.
+    cron_schedule="0 3 * * *",
     execution_timezone="UTC",
     default_status=DefaultScheduleStatus.RUNNING,
 )
-
 
 # ---------------------------------------------------------------------------
 # alerting
