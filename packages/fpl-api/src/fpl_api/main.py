@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from fastapi import FastAPI
 
 from fpl_api import db
+from fpl_api.routers import teams
 
 VERSION = "0.1.0"
 
@@ -24,6 +25,8 @@ app = FastAPI(
     version=VERSION,
     lifespan=lifespan,
 )
+
+app.include_router(teams.router)
 
 
 @app.get("/health")
