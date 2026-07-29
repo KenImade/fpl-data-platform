@@ -157,7 +157,7 @@ async def require_key(request: Request) -> ApiKey:
     ):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            f"Origin not permitted for this key. Allowed: " f"{', '.join(key.allowed_origins)}",
+            f"Origin not permitted for this key. Allowed: {', '.join(key.allowed_origins)}",
         )
 
     await _touch(key.id)

@@ -120,8 +120,7 @@ def load_table(store: Store, conn_str: str, spec: LoadSpec) -> dict[str, object]
 
     with pg.connect(conn_str) as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT 1 FROM information_schema.tables "
-            "WHERE table_schema = $1 AND table_name = $2",
+            "SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name = $2",
             (SCHEMA, spec.table),
         )
         exists = cur.fetchone() is not None
