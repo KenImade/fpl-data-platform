@@ -5,7 +5,7 @@ from fastapi import FastAPI
 
 from fpl_api import VERSION, db, errors
 from fpl_api.logging import configure as configure_logging
-from fpl_api.routers import gameweeks, health, players, teams
+from fpl_api.routers import fixtures, gameweeks, health, players, teams
 
 configure_logging()
 
@@ -28,9 +28,5 @@ app = FastAPI(
 errors.register(app)
 
 app.include_router(health.router)
-for r in (
-    teams.router,
-    gameweeks.router,
-    players.router,
-):
+for r in (teams.router, gameweeks.router, players.router, fixtures.router):
     app.include_router(r)
