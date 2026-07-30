@@ -11,7 +11,7 @@ storage:
         env: PGDATABASE
       port: 5432
       params:
-        sslmode: require
+        sslmode: disable
 
 run_coordinator:
   module: dagster.core.run_coordinator

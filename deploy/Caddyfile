@@ -5,11 +5,7 @@
 {$API_DOMAIN} {
     encode gzip zstd
 
-    reverse_proxy api:8000 {
-        health_url /health
-        health_interval 15s
-        lb_policy round_robin
-    }
+    reverse_proxy api:8000
 
     header {
         Strict-Transport-Security "max-age=31536000; includeSubDomains"

@@ -1,12 +1,12 @@
 fpl:
-  target: dev
+  target: default
   outputs:
-    dev:
+    default:
       type: postgres
-      host: "{{ env_var('PGHOST', 'localhost') }}"
-      port: "{{ env_var('PGPORT', 5432) | int }}"
-      user: "{{ env_var('PGUSER', 'fpl') }}"
-      password: "{{ env_var('PGPASSWORD', 'fpl') }}"
-      dbname: "{{ env_var('PGDATABASE', 'fpl') }}"
+      host: "{{ env_var('DBT_DB_HOST', 'postgres') }}"
+      port: "{{ env_var('DBT_DB_PORT', '5432') | int }}"
+      user: "{{ env_var('DBT_DB_USER', 'fpl') }}"
+      password: "{{ env_var('DBT_DB_PASSWORD', 'fpl') }}"
+      dbname: "{{ env_var('DBT_DATABASE', 'fpl') }}"
       schema: analytics
       threads: 4

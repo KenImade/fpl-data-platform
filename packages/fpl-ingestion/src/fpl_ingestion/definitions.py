@@ -59,7 +59,7 @@ from fpl_ingestion.tarball import BUILDS, Scope, build_gameweek_table
 # end_offset=1 includes the in-progress day. Without it the newest partition
 # is always yesterday's, so nothing can be materialised on the day it lands —
 # which makes a cold-start rebuild impossible to verify.
-daily = DailyPartitionsDefinition(start_date="2026-07-28", end_offset=1)
+daily = DailyPartitionsDefinition(start_date="2026-07-30", end_offset=1)
 
 
 # ---------------------------------------------------------------------------

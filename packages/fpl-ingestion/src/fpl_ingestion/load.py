@@ -50,7 +50,7 @@ SPECS: tuple[LoadSpec, ...] = (
     # injury-news history, and losing it defeats the capture cadence.
     LoadSpec("fpl_players", "bronze/players/", selection="all"),
     # Core Insights daily masters.
-    LoadSpec("ci_playerstats", "bronze/core-insights/playerstats/", selection="all"),
+    LoadSpec("ci_playerstats", "bronze/core-insights/playerstats/", selection="latest"),
     LoadSpec(
         "ci_gameweek_summaries", "bronze/core-insights/gameweek_summaries/", selection="latest"
     ),
@@ -119,14 +119,35 @@ def load_table(store: Store, conn_str: str, spec: LoadSpec) -> dict[str, object]
     import adbc_driver_postgresql.dbapi as pg
 
     with pg.connect(conn_str) as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name = $2",
-            (SCHEMA, spec.table),
-        )
-        exists = cur.fetchone() is not None
+        cur.execute(f"SELECT to_regclass('{table}')")
+        exists = cur.fetchone()[0] is not None
+
         if exists:
-            cur.execute(f"TRUNCATE TABLE {table}")
-            conn.commit()
+            cur.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = $1 AND table_name = $2",
+                (SCHEMA, spec.table),
+            )
+            existing = {r[0] for r in cur.fetchall()}
+
+            if existing != set(df.columns):
+                # Bronze gains columns as sources evolve — a season's daily
+                # masters carry fields its archive never had. append cannot
+                # widen a table, so recreate.
+                #
+                # CASCADE drops the dbt views reading this table. That is
+                # safe: they are declarative and rebuilt by the dbt models
+                # downstream in this same job.
+                log.info(
+                    "schema change on %s: %d -> %d columns, recreating",
+                    table, len(existing), len(df.columns),
+                )
+                cur.execute(f"DROP TABLE {table} CASCADE")
+                exists = False
+            else:
+                cur.execute(f"TRUNCATE TABLE {table}")
+
+        conn.commit()
 
     df.write_database(
         table,
@@ -135,7 +156,9 @@ def load_table(store: Store, conn_str: str, spec: LoadSpec) -> dict[str, object]
         engine="adbc",
     )
 
-    log.info("loaded %s.%s rows=%d from %d file(s)", SCHEMA, spec.table, df.height, len(keys))
+    log.info(
+        "loaded %s rows=%d from %d file(s)", table, df.height, len(keys)
+    )
 
     return {
         "table": spec.table,
