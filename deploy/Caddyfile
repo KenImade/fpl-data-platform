@@ -2,6 +2,16 @@
     email {$ACME_EMAIL}
 }
 
+premierlytics.com, www.premierlytics.com {
+    root * /srv/docs
+
+    encode gzip zstd
+
+    try_files {path} {path}/ /index.html
+
+    file_server
+}
+
 {$API_DOMAIN} {
     encode gzip zstd
 

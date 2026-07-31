@@ -1,4 +1,5 @@
 name: CI
+
 on: [push, pull_request]
 
 concurrency:
@@ -8,11 +9,53 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: astral-sh/setup-uv@v5
+
       - run: uv sync --all-packages
+
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy
       - run: uv run pytest -q
+
+      - name: Generate data dictionary
+        run: |
+          uv run python scripts/gen_data_dictionary.py
+
+      - name: Check generated docs are committed
+        run: |
+          git diff --exit-code -- docs/src/content/docs/data/dictionary.md
+
+
+  docs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      - run: uv sync --all-packages
+
+      - name: Generate API documentation
+        run: |
+          uv run python scripts/export_openapi.py
+          uv run python scripts/gen_data_dictionary.py
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+
+      - name: Install docs dependencies
+        working-directory: docs
+        run: npm ci
+
+      - name: Build documentation
+        working-directory: docs
+        run: npm run build

@@ -1,0 +1,82 @@
+---
+title: Quickstart
+description: Make your first API request in under two minutes.
+sidebar:
+  order: 1
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+Call the API to retrieve the next Fantasy Premier League deadline for a given season.
+
+## Get the next deadline
+
+```bash
+curl \
+  -H "X-API-Key: $PREMIERLYTICS_API_KEY" \
+  "https://api.premierlytics.com/v1/gameweeks/next?season=2026-2027"
+```
+
+```json
+{
+  "season": "2026-2027",
+  "gameweek": 1,
+  "gameweek_name": "Gameweek 1",
+  "deadline_utc": "2026-08-21T17:30:00Z",
+  "fixture_count": 10,
+  "has_usable_snapshot": false
+}
+```
+
+Field highlights:
+
+- `deadline_utc` is the official gameweek deadline in UTC.
+- `fixture_count` is the number of fixtures in the gameweek.
+- `has_usable_snapshot` indicates whether historical snapshot data is available for that gameweek.
+
+## Other Ways to Get the Same Data
+
+
+<Tabs syncKey="lang">
+<TabItem label="JavaScript">
+
+
+```js
+const res = await fetch(
+  "https://api.premierlytics.com/v1/gameweeks/next?season=2026-2027",
+  {
+    headers: {
+      "X-API-Key": process.env.PREMIERLYTICS_API_KEY,
+    },
+  }
+);
+
+const gameweek = await res.json();
+```
+
+</TabItem>
+
+<TabItem label="Python">
+
+```python
+import httpx
+
+response = httpx.get(
+    "https://api.premierlytics.com/v1/gameweeks/next",
+    params={"season": "2026-2027"},
+    headers={"X-API-Key": os.environ["PREMIERLYTICS_API_KEY"],},
+)
+
+gameweek = response.json()
+```
+
+</TabItem>
+</Tabs>
+
+## Every endpoint requires a season
+
+The API has no default season. Club IDs, strength ratings, names, fixtures, and other data are season-scoped, so every request must include a `season` parameter.
+
+## Next steps
+
+The demo API key is shared and heavily rate-limited. Create your own API key before building an application, and read the Authentication guide if you're making requests from a browser.

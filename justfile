@@ -10,6 +10,17 @@ bootstrap: up _bucket _dagster_db
     uv sync --all-packages
     @echo "ready"
 
+docs-refresh:
+    uv run python scripts/gen_data_dictionary.py
+    uv run python -c "
+    import json
+    from fpl_api.main import app
+    open('docs/src/openapi.json','w').write(json.dumps(app.openapi(), indent=2))
+    "
+
+docs:
+    cd docs && npm run dev
+
 up:
     docker compose up -d --wait
 

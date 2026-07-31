@@ -1,0 +1,199 @@
+---
+title: Premierlytics
+description: Fantasy Premier League data with a point-in-time guarantee.
+template: splash
+hero:
+  tagline: |
+    Three seasons of Premier League data. Players, fixtures, per-match xG and
+    defensive actions, across every competition — with a guarantee that
+    historical features contain only what was knowable at the time.
+  actions:
+    - text: Quickstart
+      link: /guides/quickstart/
+      icon: right-arrow
+      variant: primary
+    - text: Endpoint reference
+      link: /reference/
+      icon: open-book
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard, Code, Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+
+## Try it now
+
+<Tabs syncKey="lang">
+<TabItem label="curl">
+```bash
+curl -H "X-API-Key: $PREMIERLYTICS_API_KEY" \
+  "https://api.premierlytics.com/v1/gameweeks/next?season=2026-2027"
+```
+</TabItem>
+<TabItem label="JavaScript">
+```js
+const res = await fetch(
+  "https://api.premierlytics.com/v1/gameweeks/next?season=2026-2027",
+  { headers: { "X-API-Key": process.env.PREMIERLYTICS_API_KEY, } }
+);
+const gameweek = await res.json();
+```
+</TabItem>
+<TabItem label="Python">
+```python
+import httpx
+
+r = httpx.get(
+    "https://api.premierlytics.com/v1/gameweeks/next",
+    params={"season": "2026-2027"},
+    headers={"X-API-Key": os.environ["PREMIERLYTICS_API_KEY"],},
+)
+gameweek = r.json()
+```
+</TabItem>
+</Tabs>
+
+```json
+{
+  "season": "2026-2027",
+  "gameweek": 1,
+  "deadline_utc": "2026-08-21T17:30:00Z",
+  "fixture_count": 10,
+  "has_usable_snapshot": false
+}
+```
+
+<Aside type="tip" title="No signup required">
+That key is public and rate-limited. Enough to decide whether this is useful
+before committing to anything.
+</Aside>
+
+---
+
+## Why this exists
+
+<CardGrid stagger>
+  <Card title="Point-in-time, not end-of-gameweek" icon="seti:clock">
+    Every historical feature derives from a capture made **strictly before**
+    its deadline.
+
+    Most FPL data records end-of-gameweek state, which is unusable for
+    backtesting — it contains information nobody had when the decision was
+    made. Models trained on it look excellent offline and fail live.
+  </Card>
+
+  <Card title="The joins are already done" icon="puzzle">
+    Not a wrapper around FPL's API.
+
+    Cross-season player identity resolved. Per-fixture grain, so per-match
+    scoring rules can actually be evaluated. Competition attached, so a
+    pre-season friendly isn't counted as form.
+  </Card>
+
+  <Card title="Limitations published" icon="warning">
+    Roughly 2% of scoring events are missing from the per-match data. Thirteen
+    fixtures carry placeholder timestamps. Forty-eight have no kickoff time.
+
+    All of it is [documented](/data/quality/), with scale and consequence,
+    because you'll find it anyway.
+  </Card>
+
+  <Card title="Every competition" icon="star">
+    Champions League, Europa, Conference, EFL Cup — not just the league.
+
+    A midweek European tie is real fatigue and real injury risk, and no other
+    FPL data source carries it.
+  </Card>
+</CardGrid>
+
+---
+
+## What's in it
+
+| | |
+|---|---|
+| **Seasons** | 2024/25 and 2025/26 complete, 2026/27 accumulating |
+| **Competitions** | Premier League, Champions League, Europa, Conference, EFL Cup, Community Shield, UEFA Super Cup, friendlies |
+| **Per match** | xG, xA, xGOT, shots, tackles, interceptions, blocks, clearances, recoveries, minutes on and off |
+| **Per fixture** | ClubElo at kickoff, rest days, matches in the prior fortnight |
+| **Capture cadence** | Every 3 hours, tightening to every 15 minutes in the 6 hours before a deadline |
+
+---
+
+## Coming
+
+Predictions and squad optimisation endpoints are being built and should
+be available soon.
+
+---
+
+## Where to go next
+
+<CardGrid>
+  <LinkCard
+    title="Understanding the data"
+    href="/data/understanding-the-data/"
+    description="Identifiers, grain, and competition — three things that will silently corrupt an analysis if you assume otherwise."
+  />
+  <LinkCard
+    title="Field reference"
+    href="/data/dictionary/"
+    description="Every field on every response, with its type and what null means. Generated from the models the API returns."
+  />
+  <LinkCard
+    title="Point-in-time queries"
+    href="/guides/point-in-time/"
+    description="How to get features containing only what was knowable before a deadline."
+  />
+  <LinkCard
+    title="Get a key"
+    href="/keys/"
+    description="Publishable for browsers, secret for servers. Issued within a day."
+  />
+</CardGrid>
+
+---
+
+## Acknowledgements
+
+This API is built on other people's work, most of it given away freely.
+
+### FPL-Core-Insights
+
+Nearly all match-level detail here — xG, xA, defensive actions, ClubElo
+ratings, competition coverage — comes from
+[**FPL-Core-Insights**](https://github.com/olbauday/FPL-Core-Insights) by
+[olbauday](https://github.com/olbauday), which also powers
+[fplcore.com](https://fplcore.com).
+
+It is maintained carefully and updated twice daily, and it solves a problem
+that would otherwise have taken weeks: its match statistics are already keyed
+to FPL player identifiers, so the name-matching that usually consumes the
+first month of a project like this simply does not arise.
+
+If this API is useful to you, that repository is a large part of the reason.
+
+### ClubElo
+
+Team ratings come from [**ClubElo**](http://clubelo.com/), via Core Insights.
+Being computed from results rather than assigned, they carry no hindsight and
+work for promoted clubs with no top-flight history — which is precisely when
+a prior is hardest to come by.
+
+### FotMob
+
+The underlying match statistics originate from [**FotMob**](https://www.fotmob.com/).
+
+### Fantasy Premier League
+
+Player data, prices, ownership and scoring come from the
+[**Fantasy Premier League**](https://fantasy.premierleague.com/) API, which is
+undocumented and unofficial. This project is not affiliated with or endorsed
+by the Premier League or Fantasy Premier League. All trademarks belong to
+their owners.
+
+<Aside type="note" title="Found a problem?">
+Several defects listed on the [data quality](/data/quality/) page have been
+reported upstream. If you find something not listed there, it is genuinely
+useful to hear about — include the `X-Request-ID` from the response, which
+makes it findable.
+</Aside>
