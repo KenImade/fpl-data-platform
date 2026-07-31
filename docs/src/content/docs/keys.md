@@ -1,34 +1,98 @@
 ---
 title: Get an API key
-description: Request a key for the Premierlytics API.
+description: Request a publishable or secret API key.
+sidebar:
+  order: 4
 ---
 
-Keys are issued manually at the moment. Send a request and you will hear
-back within a day.
+Premierlytics is currently in **early access**.
 
-## What to tell us
+API keys are issued manually while the platform grows. That keeps abuse under
+control, helps me understand how people are using the API, and lets me shape
+new endpoints around real-world use cases.
 
-- **What you are building.** A line is enough — it helps to know whether the
-  rate limit suits you.
-- **Which key type.** [Publishable or secret](/guides/authentication/) — if
-  the key will exist in browser code, it must be publishable.
-- **Origins**, if publishable and you want it restricted to your domain.
-  Recommended: a restricted key that leaks is worth nothing to anyone else.
+Most requests receive a reply within **one business day**.
 
-## Request
+## Which key do you need?
 
-[form: name, email, use, key type, origins]
+### Publishable (`pk_`)
 
-## While you wait
+For browser applications.
 
-The demo key on the [home page](/) works for everything read-only, at a
-lower rate limit. Enough to decide whether this is useful before committing
-to anything.
+Use a publishable key if requests originate from JavaScript running in a user's
+browser.
 
-## Why not self-service
+A publishable key:
 
-An account system is meaningful work, and at current volume manual issuance
-costs a few minutes. If that stops being true it will change.
+- is safe to embed in frontend code
+- provides read-only access
+- can be restricted to specific origins
+- has modest rate limits
 
-The practical consequence: keys are tied to a person rather than an account,
-and there is no dashboard to rotate one yourself. Ask and it will be rotated.
+### Secret (`sk_`)
+
+For servers, scripts and backend services.
+
+Secret keys should never be exposed to browsers or mobile applications.
+
+A secret key:
+
+- has higher rate limits
+- is intended for server-side applications
+- must be kept private
+- is rejected if sent from a browser
+
+If you're unsure which you need, request a publishable key. You can always
+upgrade later.
+
+---
+
+## Request a key
+
+Send an email to **kenneth.imade@yahoo.com** with:
+
+- what you're building
+- whether you need a publishable (`pk_`) or secret (`sk_`) key
+- an estimate of expected usage (optional)
+
+A short email is perfectly fine.
+
+> Hi,
+>
+> I'm building an FPL research project that predicts player performance from
+> historical fixture data. I'd like a publishable API key for development.
+>
+> Thanks!
+
+Most requests are approved within one business day.
+
+---
+
+## Why are keys issued manually?
+
+Premierlytics is still in its early stages.
+
+Issuing keys manually lets me:
+
+- understand how people are using the API
+- prioritise new endpoints around real use cases
+- keep rate limits sensible while the platform grows
+- provide direct support during integration
+
+Self-service registration will come later. The API itself is designed to remain
+stable, so your integration will not need to change when that happens.
+
+---
+
+## Before you request a key
+
+You can explore the documentation without one:
+
+- Read the **Quickstart** to see your first request.
+- Learn about **Point-in-time queries** and how snapshots prevent historical leakage.
+- Browse the **Endpoint reference** to see every available endpoint.
+- Read **Understanding the data** before building historical features.
+
+If you're unsure whether Premierlytics fits your project, include a brief
+description in your email. I'm happy to recommend the most appropriate
+endpoints or discuss your use case.

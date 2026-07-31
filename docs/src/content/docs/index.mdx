@@ -1,54 +1,84 @@
 ---
 title: Premierlytics
-description: Fantasy Premier League data with a point-in-time guarantee.
+description: Fantasy Premier League data built for modelling, with point-in-time guarantees.
 template: splash
 hero:
   tagline: |
-    Three seasons of Premier League data. Players, fixtures, per-match xG and
-    defensive actions, across every competition — with a guarantee that
-    historical features contain only what was knowable at the time.
+    FPL data built for modelling.
+    Players, fixtures, per-match metrics, and every competition —
+    with point-in-time guarantees that prevent historical leakage.
   actions:
+    - text: Get an API key
+      link: /keys/
+      variant: primary
     - text: Quickstart
       link: /guides/quickstart/
       icon: right-arrow
-      variant: primary
+      variant: minimal
     - text: Endpoint reference
       link: /reference/
       icon: open-book
       variant: minimal
 ---
 
-import { Card, CardGrid, LinkCard, Code, Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+import {
+  Card,
+  CardGrid,
+  LinkCard,
+  Tabs,
+  TabItem,
+  Aside,
+} from '@astrojs/starlight/components';
 
-## Try it now
+## Your first API call
+
+The first request returns the next deadline and whether a usable
+point-in-time snapshot exists.
 
 <Tabs syncKey="lang">
 <TabItem label="curl">
+
 ```bash
 curl -H "X-API-Key: $PREMIERLYTICS_API_KEY" \
   "https://api.premierlytics.com/v1/gameweeks/next?season=2026-2027"
 ```
+
 </TabItem>
+
 <TabItem label="JavaScript">
+
 ```js
 const res = await fetch(
   "https://api.premierlytics.com/v1/gameweeks/next?season=2026-2027",
-  { headers: { "X-API-Key": process.env.PREMIERLYTICS_API_KEY, } }
+  {
+    headers: {
+      "X-API-Key": process.env.PREMIERLYTICS_API_KEY,
+    },
+  }
 );
+
 const gameweek = await res.json();
 ```
+
 </TabItem>
+
 <TabItem label="Python">
+
 ```python
+import os
 import httpx
 
 r = httpx.get(
     "https://api.premierlytics.com/v1/gameweeks/next",
     params={"season": "2026-2027"},
-    headers={"X-API-Key": os.environ["PREMIERLYTICS_API_KEY"],},
+    headers={
+        "X-API-Key": os.environ["PREMIERLYTICS_API_KEY"],
+    },
 )
+
 gameweek = r.json()
 ```
+
 </TabItem>
 </Tabs>
 
@@ -62,9 +92,15 @@ gameweek = r.json()
 }
 ```
 
-<Aside type="tip" title="No signup required">
-That key is public and rate-limited. Enough to decide whether this is useful
-before committing to anything.
+<Aside type="tip" title="Ready to try it?">
+
+Request a publishable or secret API key by email.
+
+Keys are issued personally while the platform is in early access, usually
+within one business day.
+
+[Get an API key](/keys/)
+
 </Aside>
 
 ---
@@ -72,128 +108,168 @@ before committing to anything.
 ## Why this exists
 
 <CardGrid stagger>
-  <Card title="Point-in-time, not end-of-gameweek" icon="seti:clock">
-    Every historical feature derives from a capture made **strictly before**
-    its deadline.
 
-    Most FPL data records end-of-gameweek state, which is unusable for
-    backtesting — it contains information nobody had when the decision was
-    made. Models trained on it look excellent offline and fail live.
-  </Card>
+<Card title="No historical leakage" icon="seti:clock">
 
-  <Card title="The joins are already done" icon="puzzle">
-    Not a wrapper around FPL's API.
+Every historical feature derives from a capture made **strictly before**
+its deadline.
 
-    Cross-season player identity resolved. Per-fixture grain, so per-match
-    scoring rules can actually be evaluated. Competition attached, so a
-    pre-season friendly isn't counted as form.
-  </Card>
+Most FPL datasets expose end-of-gameweek state, which contains information
+that was unavailable when managers made their decisions. Models trained on
+that data often look excellent offline and disappoint in production.
 
-  <Card title="Limitations published" icon="warning">
-    Roughly 2% of scoring events are missing from the per-match data. Thirteen
-    fixtures carry placeholder timestamps. Forty-eight have no kickoff time.
+</Card>
 
-    All of it is [documented](/data/quality/), with scale and consequence,
-    because you'll find it anyway.
-  </Card>
+<Card title="The joins are already done" icon="puzzle">
 
-  <Card title="Every competition" icon="star">
-    Champions League, Europa, Conference, EFL Cup — not just the league.
+Not a wrapper around FPL's API.
 
-    A midweek European tie is real fatigue and real injury risk, and no other
-    FPL data source carries it.
-  </Card>
+Cross-season player identity is resolved. Data is stored at fixture grain so
+per-match scoring rules can be evaluated correctly. Competition is attached,
+so a pre-season friendly is never mistaken for league form.
+
+</Card>
+
+<Card title="Built with provenance" icon="warning">
+
+Every field has a source and every limitation is published.
+
+Capture data, upstream statistics and derived features are separated, so you
+always know where a value came from and what assumptions it carries.
+
+</Card>
+
+<Card title="Every competition" icon="star">
+
+Premier League, Champions League, Europa League, Conference League, EFL Cup,
+Community Shield, UEFA Super Cup and friendlies.
+
+A midweek European tie is real fatigue and real injury risk, and most FPL
+datasets simply do not include it.
+
+</Card>
+
 </CardGrid>
 
 ---
 
-## What's in it
+## Why not just use the FPL API?
+
+The official Fantasy Premier League API is excellent for live fantasy
+football. It is not designed as a historical research dataset.
+
+Premierlytics adds:
+
+- immutable snapshots before every deadline
+- stable identifiers across seasons
+- match-level statistics
+- competition context
+- reproducible historical feature generation
+
+---
+
+## Built for
+
+- **Fantasy researchers** building predictive models.
+- **Quant developers** creating repeatable FPL pipelines.
+- **Analysts** who need reproducible historical datasets.
+
+---
+
+## What's included
 
 | | |
 |---|---|
 | **Seasons** | 2024/25 and 2025/26 complete, 2026/27 accumulating |
-| **Competitions** | Premier League, Champions League, Europa, Conference, EFL Cup, Community Shield, UEFA Super Cup, friendlies |
-| **Per match** | xG, xA, xGOT, shots, tackles, interceptions, blocks, clearances, recoveries, minutes on and off |
-| **Per fixture** | ClubElo at kickoff, rest days, matches in the prior fortnight |
-| **Capture cadence** | Every 3 hours, tightening to every 15 minutes in the 6 hours before a deadline |
+| **Competitions** | Premier League, Champions League, Europa League, Conference League, EFL Cup, Community Shield, UEFA Super Cup, friendlies |
+| **Per match** | xG, xA, xGOT, shots, tackles, interceptions, blocks, clearances, recoveries, minutes on/off |
+| **Per fixture** | ClubElo at kickoff, rest days, matches in the previous 14 days |
+| **Capture cadence** | Every 3 hours, tightening to every 15 minutes during the 6 hours before each deadline |
 
 ---
 
-## Coming
+## Coming soon
 
-Predictions and squad optimisation endpoints are being built and should
-be available soon.
+- Interactive API explorer
+- Browser-based "Try it live" requests
+- Prediction endpoints
+- Squad optimisation endpoints
 
 ---
 
 ## Where to go next
 
 <CardGrid>
-  <LinkCard
-    title="Understanding the data"
-    href="/data/understanding-the-data/"
-    description="Identifiers, grain, and competition — three things that will silently corrupt an analysis if you assume otherwise."
-  />
-  <LinkCard
-    title="Field reference"
-    href="/data/dictionary/"
-    description="Every field on every response, with its type and what null means. Generated from the models the API returns."
-  />
-  <LinkCard
-    title="Point-in-time queries"
-    href="/guides/point-in-time/"
-    description="How to get features containing only what was knowable before a deadline."
-  />
-  <LinkCard
-    title="Get a key"
-    href="/keys/"
-    description="Publishable for browsers, secret for servers. Issued within a day."
-  />
+
+<LinkCard
+  title="Quickstart"
+  href="/guides/quickstart/"
+  description="Make your first request in under two minutes."
+/>
+
+<LinkCard
+  title="Point-in-time queries"
+  href="/guides/point-in-time/"
+  description="Retrieve only information that existed before a deadline."
+/>
+
+<LinkCard
+  title="Understanding the data"
+  href="/data/understanding-the-data/"
+  description="Identifiers, grain and competition—the three things most likely to invalidate an analysis."
+/>
+
+<LinkCard
+  title="Field reference"
+  href="/data/dictionary/"
+  description="Every response field, its type and what null means. Generated directly from the API models."
+/>
+
 </CardGrid>
 
 ---
 
 ## Acknowledgements
 
-This API is built on other people's work, most of it given away freely.
+This API builds on several excellent open datasets and projects.
 
 ### FPL-Core-Insights
 
-Nearly all match-level detail here — xG, xA, defensive actions, ClubElo
-ratings, competition coverage — comes from
-[**FPL-Core-Insights**](https://github.com/olbauday/FPL-Core-Insights) by
-[olbauday](https://github.com/olbauday), which also powers
-[fplcore.com](https://fplcore.com).
+Nearly all match-level statistics—xG, xA, defensive actions, ClubElo ratings
+and competition coverage—come from **FPL-Core-Insights** by **olbauday**,
+which also powers **fplcore.com**.
 
-It is maintained carefully and updated twice daily, and it solves a problem
-that would otherwise have taken weeks: its match statistics are already keyed
-to FPL player identifiers, so the name-matching that usually consumes the
-first month of a project like this simply does not arise.
+It solves one of the hardest parts of football data engineering: matching
+match statistics to FPL player identities.
 
-If this API is useful to you, that repository is a large part of the reason.
+If Premierlytics is useful to you, that project deserves much of the credit.
 
 ### ClubElo
 
-Team ratings come from [**ClubElo**](http://clubelo.com/), via Core Insights.
-Being computed from results rather than assigned, they carry no hindsight and
-work for promoted clubs with no top-flight history — which is precisely when
-a prior is hardest to come by.
+Club ratings originate from **ClubElo**, via Core Insights.
+
+Because they are calculated from results rather than assigned manually, they
+provide useful pre-match strength estimates, including for newly promoted
+clubs.
 
 ### FotMob
 
-The underlying match statistics originate from [**FotMob**](https://www.fotmob.com/).
+Underlying match statistics originate from **FotMob**.
 
 ### Fantasy Premier League
 
-Player data, prices, ownership and scoring come from the
-[**Fantasy Premier League**](https://fantasy.premierleague.com/) API, which is
-undocumented and unofficial. This project is not affiliated with or endorsed
-by the Premier League or Fantasy Premier League. All trademarks belong to
-their owners.
+Player prices, ownership, availability and official scoring originate from
+the Fantasy Premier League API.
+
+Premierlytics is an independent project and is not affiliated with or
+endorsed by the Premier League or Fantasy Premier League.
 
 <Aside type="note" title="Found a problem?">
-Several defects listed on the [data quality](/data/quality/) page have been
-reported upstream. If you find something not listed there, it is genuinely
-useful to hear about — include the `X-Request-ID` from the response, which
-makes it findable.
+
+Known defects are documented on the
+[data quality](/data/quality/) page.
+
+If you discover something new, include the `X-Request-ID` from the response.
+It makes reproducing and investigating the issue much easier.
+
 </Aside>
