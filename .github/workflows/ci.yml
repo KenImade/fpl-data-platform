@@ -1,9 +1,14 @@
 name: CI
 
-on: [push, pull_request]
+on:
+  push:
+    branches:
+      - main
+      - "**"
+  pull_request:
 
 concurrency:
-  group: ${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -22,16 +27,19 @@ jobs:
       - run: uv run mypy
       - run: uv run pytest -q
 
-      - name: Generate data dictionary
+      - name: Regenerate generated files
         run: |
+          uv run python scripts/export_openapi.py
           uv run python scripts/gen_data_dictionary.py
 
-      - name: Check generated docs are committed
+      - name: Ensure generated files are committed
         run: |
-          git diff --exit-code -- docs/src/content/docs/data/dictionary.md
-
+          git diff --exit-code -- \
+            docs/src/openapi.json \
+            docs/src/content/docs/data/dictionary.md
 
   docs:
+    needs: check
     runs-on: ubuntu-latest
 
     steps:
@@ -41,7 +49,7 @@ jobs:
 
       - run: uv sync --all-packages
 
-      - name: Generate API documentation
+      - name: Generate docs sources
         run: |
           uv run python scripts/export_openapi.py
           uv run python scripts/gen_data_dictionary.py
@@ -52,10 +60,38 @@ jobs:
           cache: npm
           cache-dependency-path: docs/package-lock.json
 
-      - name: Install docs dependencies
+      - name: Install dependencies
         working-directory: docs
         run: npm ci
 
       - name: Build documentation
         working-directory: docs
+        env:
+          PUBLIC_PREMIERLYTICS_API_KEY: ${{ secrets.PUBLIC_PREMIERLYTICS_API_KEY }}
         run: npm run build
+
+      - name: Deploy documentation
+        if: github.ref == 'refs/heads/main'
+        uses: burnett01/rsync-deployments@7.0.2
+        with:
+          switches: -avzr --delete
+          path: docs/dist/
+          remote_path: /srv/docs/
+          remote_host: ${{ secrets.DOCS_HOST }}
+          remote_user: ${{ secrets.DOCS_USER }}
+          remote_key: ${{ secrets.DOCS_SSH_KEY }}
+        
+      - name: Configure SSH
+        if: github.ref == 'refs/heads/main'
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DOCS_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "${{ secrets.DOCS_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Deploy documentation
+        if: github.ref == 'refs/heads/main'
+        run: |
+          rsync -az --delete \
+            docs/dist/ \
+            ${{ secrets.DOCS_USER }}@${{ secrets.DOCS_HOST }}:/srv/docs/
