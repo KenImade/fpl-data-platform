@@ -290,4 +290,4 @@ scratch/
 
 transform/logs/
 transform/target/
-transform/dbt_packages/
+transform/dbt_packages/deploy/*-auth.caddy
