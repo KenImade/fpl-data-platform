@@ -29,7 +29,6 @@ WORKDIR /app
 COPY --from=build --chown=app /app /app
 COPY --chown=app rulesets/ rulesets/
 COPY --chown=app transform/ transform/
-COPY --chown=app deploy/dagster.yaml /dagster-home/dagster.yaml
 
 USER app
 
