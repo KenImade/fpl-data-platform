@@ -2,7 +2,17 @@
     email {$ACME_EMAIL}
 }
 
+(hardening) {
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        -Server
+    }
+}
+
 premierlytics.com, www.premierlytics.com {
+    import hardening
+
     root * /srv/docs
 
     encode gzip zstd
@@ -13,21 +23,24 @@ premierlytics.com, www.premierlytics.com {
 }
 
 {$API_DOMAIN} {
+    import hardening
+
     encode gzip zstd
 
     reverse_proxy api:8000
-
-    header {
-        Strict-Transport-Security "max-age=31536000; includeSubDomains"
-        X-Content-Type-Options "nosniff"
-        -Server
-    }
 }
 
 {$DAGSTER_DOMAIN} {
-    basic_auth {
-        admin {$DAGSTER_BASIC_AUTH}
-    }
-
+    import hardening
+    encode gzip zstd
+    import dagster-auth.caddy
     reverse_proxy dagster-web:3000
+}
+
+{$DOZZLE_DOMAIN} {
+    import hardening
+    import dozzle-auth.caddy
+    reverse_proxy dozzle:8080 {
+        flush_interval -1
+    }
 }

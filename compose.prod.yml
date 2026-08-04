@@ -10,27 +10,36 @@ x-dagster-env: &dagster-env
   DAGSTER_HOME: /dagster-home
   PGHOST: postgres
   PGPORT: "5432"
-  PGUSER: ${POSTGRES_USER}
-  PGPASSWORD: ${POSTGRES_PASSWORD}
+  PGUSER: ${POSTGRES_USER:?POSTGRES_USER is required}
+  PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
   PGDATABASE: dagster
   DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
   DBT_DB_HOST: postgres
   DBT_DB_PORT: "5432"
   DBT_DB_USER: ${POSTGRES_USER}
   DBT_DB_PASSWORD: ${POSTGRES_PASSWORD}
-  DBT_DATABASE: ${POSTGRES_DB}
-  S3_ENDPOINT_URL: ${S3_ENDPOINT_URL}
-  S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
-  S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
-  S3_BUCKET: ${S3_BUCKET}
-  USER_AGENT: ${USER_AGENT}
-  HEARTBEAT_URL: ${HEARTBEAT_URL}
+  DBT_DATABASE: ${POSTGRES_DB:?POSTGRES_DB is required}
+  S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:?S3_ENDPOINT_URL is required}
+  S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?S3_ACCESS_KEY_ID is required}
+  S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?S3_SECRET_ACCESS_KEY is required}
+  S3_BUCKET: ${S3_BUCKET:?S3_BUCKET is required}
+  USER_AGENT: ${USER_AGENT:-premierlytics/1.0}
+  HEARTBEAT_URL: ${HEARTBEAT_URL:-}
   DBT_PROJECT_DIR: /app/transform
   DBT_PROFILES_DIR: /app/transform
   ENV: production
 
-services:
+networks:
+  # Reachable from Caddy. Anything that serves HTTP lives here.
+  edge:
+    name: fpl_edge
+  # Datastores and workers. Not published to the host, not reachable from
+  # Caddy — but NOT `internal: true`, because dagster-daemon needs to reach
+  # the FPL API and backup needs to reach S3.
+  internal:
+    name: fpl_internal
 
+services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
@@ -40,21 +49,28 @@ services:
       - "443:443/udp"
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - /srv/docs:/srv/docs
       - caddy_data:/data
       - caddy_config:/config
+      - ./deploy/dagster-auth.caddy:/etc/caddy/dagster-auth.caddy:ro
+      - ./deploy/dozzle-auth.caddy:/etc/caddy/dozzle-auth.caddy:ro
     environment:
-      API_DOMAIN: ${API_DOMAIN}
-      DAGSTER_DOMAIN: ${DAGSTER_DOMAIN}
-      DAGSTER_BASIC_AUTH: ${DAGSTER_BASIC_AUTH}
-      ACME_EMAIL: ${ACME_EMAIL}
+      API_DOMAIN: ${API_DOMAIN:?API_DOMAIN is required}
+      DAGSTER_DOMAIN: ${DAGSTER_DOMAIN:?DAGSTER_DOMAIN is required}
+      DOZZLE_DOMAIN: ${DOZZLE_DOMAIN:?DOZZLE_DOMAIN is required}
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL is required}
     depends_on:
+      # service_started, NOT service_healthy: a sick API must not stop the
+      # edge from serving docs, the Dagster UI, or a useful 502.
       api:
-        condition: service_healthy
+        condition: service_started
+    networks:
+      - edge
     logging: *logging
     deploy:
       resources:
         limits: { memory: 128M }
-  
+
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped
@@ -62,7 +78,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
-      API_DB_PASSWORD: ${API_DB_PASSWORD}
+      API_DB_PASSWORD: ${API_DB_PASSWORD:?API_DB_PASSWORD is required}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./deploy/init:/docker-entrypoint-initdb.d:ro
@@ -72,7 +88,7 @@ services:
       -c effective_cache_size=1536MB
       -c work_mem=16MB
       -c maintenance_work_mem=128MB
-      -c max_connections=100
+      -c max_connections=200
       -c random_page_cost=1.1
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
@@ -80,11 +96,13 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    networks:
+      - internal
     logging: *logging
     deploy:
       resources:
         limits: { memory: 2G }
-  
+
   redis:
     image: redis:7-alpine
     restart: unless-stopped
@@ -93,6 +111,8 @@ services:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       retries: 5
+    networks:
+      - internal
     logging: *logging
     deploy:
       resources:
@@ -104,9 +124,10 @@ services:
       dockerfile: Dockerfile.api
       args:
         GIT_SHA: ${GIT_SHA:-unknown}
+    image: fpl-api:${GIT_SHA:-dev}
     restart: unless-stopped
     environment:
-      API_DATABASE_URL: postgresql://${API_DB_USER}:${API_DB_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      API_DATABASE_URL: postgresql://${API_DB_USER:?API_DB_USER is required}:${API_DB_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379/0
       CORS_ORIGINS: ${CORS_ORIGINS:-*}
       GIT_SHA: ${GIT_SHA:-unknown}
@@ -129,54 +150,71 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+    networks:
+      - edge
+      - internal
     logging: *logging
     deploy:
       replicas: 2
       resources:
         limits: { memory: 512M }
-  
+
   dagster-daemon:
     build:
       context: .
       dockerfile: Dockerfile
       args:
         GIT_SHA: ${GIT_SHA:-unknown}
+    image: fpl-dagster:${GIT_SHA:-dev}
     restart: unless-stopped
     command: dagster-daemon run -m fpl_ingestion.definitions
     environment: *dagster-env
     volumes:
-      - dagster_logs:/dagster-home/storage
+      - ./deploy/dagster.yaml:/dagster-home/dagster.yaml:ro
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - internal
     logging: *logging
     deploy:
       replicas: 1
       resources:
-        limits: { memory: 1536M }
-  
+        # With the default run launcher, every scheduled run executes as a
+        # subprocess INSIDE this container. This ceiling covers the daemon
+        # plus all concurrent runs. Size it against your worst backfill, or
+        # move to DockerRunLauncher so runs get their own limits.
+        limits: { memory: 4G }
+
   dagster-web:
     build:
       context: .
       dockerfile: Dockerfile
       args:
         GIT_SHA: ${GIT_SHA:-unknown}
+    image: fpl-dagster:${GIT_SHA:-dev}
     restart: unless-stopped
     command: dagster-webserver -h 0.0.0.0 -p 3000 -m fpl_ingestion.definitions
     environment: *dagster-env
     volumes:
-      - dagster_logs:/dagster-home/storage:ro
+      # Not read-only: the webserver writes to DAGSTER_HOME to launch
+      # and terminate runs.
+      - ./deploy/dagster.yaml:/dagster-home/dagster.yaml:ro
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - edge
+      - internal
     logging: *logging
     deploy:
       resources:
         limits: { memory: 512M }
-  
+
   backup:
     build:
       context: ./deploy/backup
+    image: fpl-backup:${GIT_SHA:-dev}
     restart: unless-stopped
     environment:
       PGHOST: postgres
@@ -188,10 +226,12 @@ services:
       AWS_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
       S3_BUCKET: ${S3_BUCKET}
       BACKUP_INTERVAL_HOURS: 6
-      BACKUP_HEARTBEAT_URL: ${BACKUP_HEARTBEAT_URL}
+      BACKUP_HEARTBEAT_URL: ${BACKUP_HEARTBEAT_URL:-}
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - internal
     logging: *logging
     deploy:
       resources:
@@ -201,5 +241,3 @@ volumes:
   postgres_data:
   caddy_data:
   caddy_config:
-  dagster_logs:
-      

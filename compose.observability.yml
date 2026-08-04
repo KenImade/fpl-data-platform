@@ -1,0 +1,51 @@
+name: dozzle
+
+# Deliberately a separate project from `fpl`, so `docker compose down` on the
+# stack does not take the log viewer down with it.
+#
+# Deploy to /opt/dozzle/ on the server:
+#   mkdir -p /opt/dozzle/data
+#   docker run -it --rm amir20/dozzle:v8.14.1 generate kenneth \
+#     --password 'CHANGEME' --email you@example.com --name "Kenneth" \
+#     > /opt/dozzle/data/users.yml
+#   chmod 600 /opt/dozzle/data/users.yml
+#   cd /opt/dozzle && docker compose up -d
+#
+# The fpl stack must be up first so the fpl_edge network exists.
+
+services:
+  dozzle:
+    image: amir20/dozzle:v8.14.1
+    container_name: dozzle
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./data:/data
+    environment:
+      DOZZLE_AUTH_PROVIDER: simple
+      DOZZLE_NO_ANALYTICS: "true"
+      DOZZLE_ENABLE_ACTIONS: "false"
+      DOZZLE_ENABLE_SHELL: "false"
+      # Hide Caddy, Dozzle itself, and anything else on the box.
+      # Drop this line if you want a full host view.
+      DOZZLE_FILTER: label=com.docker.compose.project=fpl
+    healthcheck:
+      test: ["CMD", "/dozzle", "healthcheck"]
+      interval: 30s
+      retries: 3
+      start_period: 10s
+    networks:
+      - edge
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits: { memory: 256M }
+
+networks:
+  edge:
+    name: fpl_edge
+    external: true

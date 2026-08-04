@@ -1,0 +1,3 @@
+basic_auth {
+    admin $2a$14$5BPinltcFDK.cqkZI9F.8.OElnMYZlm60bSE2nvRIllJVi/69QyeW
+}
