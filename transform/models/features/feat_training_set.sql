@@ -30,6 +30,15 @@
     That property is the only one about this model that matters, and the leakage
     tests are what assert it.
 
+    ONE last_appearance_at, FROM THE SPINE. feat_player_load computes its own
+    across all competitions; the spine's is league-only, matching
+    prior_appearances. The spine's wins and the load version is excluded below,
+    because two columns of the same name differing only in which competitions
+    they count is the kind of ambiguity that survives review and then produces a
+    number nobody can explain. The all-competition information is not lost — it
+    is carried in usable form by excess_days_since_appearance and
+    minutes_last_club_fixture.
+
     Opponent strength is joined on the OPPONENT's team_code — an inversion here
     would silently reverse every fixture-difficulty feature while producing no
     error, which is why both joins are spelled out rather than aliased loosely.
@@ -178,7 +187,9 @@ select
         from=ref('feat_player_load'),
         relation_alias='lo',
         except=['snapshot_id', 'season', 'gameweek', 'deadline_utc',
-                'player_id', 'player_code', 'team_code', 'position', 'built_at']
+                'player_id', 'player_code', 'team_code', 'position',
+                'last_appearance_at', 'days_since_last_appearance',
+                'club_last_fixture_at', 'built_at']
     ) }},
 
     -- own team strength

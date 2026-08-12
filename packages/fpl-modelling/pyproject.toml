@@ -7,7 +7,14 @@ authors = [
     { name = "Kenneth Imade", email = "kenneth.imade@yahoo.com" }
 ]
 requires-python = ">=3.13,<3.14"
-dependencies = []
+dependencies = [
+    "connectorx>=0.4.5",
+    "lightgbm>=4.7.0",
+    "numpy>=2.5.2",
+    "pandas>=3.0.5",
+    "polars>=1.43.1",
+    "pyarrow>=25.0.0",
+]
 
 [build-system]
 requires = ["uv_build>=0.11.32,<0.12.0"]

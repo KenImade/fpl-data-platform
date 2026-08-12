@@ -158,24 +158,34 @@ models:
 
   - name: feat_player_load
     description: >
-      Fatigue and rotation risk, as at each deadline. One row per player per
+      Selection share and fatigue, as at each deadline. One row per player per
       gameweek.
 
-      ALL COMPETITIONS, deliberately — the mirror of feat_player_form. A
-      Thursday Europa tie is exactly the load that causes Sunday rotation,
-      and fct_player_gw carries it because the fact was built at fixture
-      grain across every competition for this purpose.
+      TWO BLOCKS, TWO DIFFERENT QUESTIONS. The selection block asks whether a
+      player is being picked and indexes windows by the CLUB'S FIXTURES; the
+      fatigue block asks whether they are tired and indexes by DAYS. A player
+      who started the last three matches their club played is a starter
+      whether that took ten days or thirty, but three matches in seven days is
+      a different physical state from three in twenty-one.
 
-      PER-PLAYER, NOT PER-TEAM. "The club played Thursday" is a weak proxy;
-      "this player played 90 minutes on Thursday" is close to the causal
-      variable. Individual European minutes are the strongest edge available
-      in the minutes model, and most public FPL models lack them because they
-      ingest only the FPL API.
+      WHY THE SPLIT EXISTS. An earlier version used day windows for both, and
+      failed at GW32 2025/26: the deadline fell three weeks after GW31 across
+      the March international break, so minutes_14d was 0.00 for every player
+      in the gameweek. The model's top features all read "nobody has played in
+      a month" and it predicted nobody would start — p_60 peaked at 0.36
+      across 841 rows where the true rate was 0.25. That inference was correct
+      given what it saw; the features were wrong. A zero in a day-indexed
+      window conflates "not selected" with "the league paused", and there are
+      three international breaks a season.
 
-      Windows are intervals rather than fixture counts — load decays with
-      elapsed days, the opposite choice to feat_player_form. Friendlies are
-      excluded; counting them would show a pre-season squad as critically
-      fatigued.
+      NULL, NOT ZERO, WHERE THE DENOMINATOR IS EMPTY. Every share here is null
+      when the club played no qualifying fixtures in the window. An unknown
+      share is not a share of zero, and LightGBM splits on missingness
+      natively.
+
+      ALL COMPETITIONS in both blocks, friendlies excluded from both. A midweek
+      European tie is the load that causes Sunday rotation, which is why
+      fct_player_gw was built at fixture grain across every competition.
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -185,36 +195,96 @@ models:
         tests: [not_null]
       - name: player_id
         tests: [not_null]
-      - name: minutes_7d
+
+      # -- selection block ------------------------------------------------
+      - name: club_fixtures_3
         description: >
-          Zero rather than NULL for a player with no fixtures in the window —
-          they genuinely have no load. The opposite convention to
-          feat_player_form, where absence means unknown.
+          Fixtures the club played in the window. Usually 3, fewer early in a
+          season — carried rather than assumed, because it is the denominator.
+      - name: minutes_share_3
+        description: >
+          Share of available minutes across the club's last 3 fixtures.
+          Invariant to calendar gaps by construction: an international break
+          changes when those fixtures happened, not which they were.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+                config:
+                  where: "minutes_share_3 is not null"
+      - name: start_rate_5
+        description: >
+          Fraction of the club's last 5 fixtures the player started, meaning
+          60+ minutes. The primary selection feature.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+                config:
+                  where: "start_rate_5 is not null"
+      - name: minutes_share_10
+        description: >
+          The long-run version. Slower to react to a change in standing, so
+          useful alongside the 3-fixture window rather than instead of it.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+                config:
+                  where: "minutes_share_10 is not null"
+      - name: minutes_last_club_fixture
+        description: >
+          What the player did in the club's most recent match. The single
+          strongest selection signal — did they play last time out.
+      - name: started_last_club_fixture
+        tests: [not_null]
+      - name: last_club_fixture_non_league
+        description: >
+          The club's most recent fixture was European or cup. The rotation
+          signal in its rawest form: a Thursday tie predicts a Sunday rest.
+        tests: [not_null]
+
+      # -- fatigue block --------------------------------------------------
+      - name: club_fixtures_14d
+        description: >
+          Fixtures the club played in 14 days. Zero here is what makes a zero
+          minutes_14d interpretable — without it, "played 0 minutes" is
+          ambiguous between rested and unavailable.
+        tests: [not_null]
+      - name: minutes_14d
+        description: >
+          Raw minutes in the window. Zero rather than NULL, because the
+          denominator alongside it says whether that zero means anything.
         tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments:
                 min_value: 0
-                max_value: 360
+                max_value: 720
+      - name: minutes_share_14d
+        description: >
+          NULL — not zero — where the club played nothing in 14 days, which is
+          exactly what an international break produces.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+                config:
+                  where: "minutes_share_14d is not null"
       - name: non_league_minutes_14d
         description: >
-          European and cup minutes. The rotation signal proper — league
-          minutes in the same window predict selection, these predict rest.
-        tests: [not_null]
-      - name: last_fixture_at
-        description: >
-          Kickoff of the most recent fixture in any competition before this
-          deadline. Asserted below the deadline by the leakage test.
-      - name: last_fixture_was_non_league
-        description: >
-          Midweek European or cup tie immediately preceding this deadline.
-          The single most direct rotation signal available.
+          European and cup minutes. League minutes in the same window predict
+          selection; these predict rest.
         tests: [not_null]
       - name: acute_chronic_ratio
         description: >
-          Recent load against the established baseline (7-day rate scaled to
-          28 days, over actual 28-day load). Above 1 means a spike. NULL
-          where there is no 28-day baseline.
+          Recent load against the established baseline — the 7-day rate scaled
+          to 28 days, over actual 28-day load. Above 1 means a spike. NULL
+          where there is no baseline to compare against.
         tests:
           - dbt_utils.accepted_range:
               arguments:
@@ -223,74 +293,30 @@ models:
                 config:
                   where: "acute_chronic_ratio is not null"
                   severity: warn
-      - name: team_matches_prior_14d
-        description: >
-          Club-level congestion, whether or not this player featured. Signed
-          OPPOSITE to the player's own load: a squad player at a congested
-          club is a rotation beneficiary. Both are needed.
-      - name: status
-        description: >
-          FPL availability flag at the deadline. The strongest single
-          predictor of non-appearance.
 
-  - name: feat_team_strength
-    description: >
-      Attacking and defensive strength, as at each deadline. One row per club
-      per gameweek.
+      # -- calendar context -----------------------------------------------
+      - name: last_appearance_at
+        description: >
+          Kickoff of the player's most recent appearance in any competition.
+          Asserted below deadline_utc by the leakage test.
+      - name: club_last_fixture_at
+        description: >
+          Kickoff of the club's most recent fixture. The denominator's anchor,
+          and asserted below the deadline for the same reason.
+      - name: excess_days_since_appearance
+        description: >
+          The player's gap since appearing, minus the club's gap since
+          playing. Near zero means they featured in the last available
+          fixture; large means the club has played since they last did.
 
-      Elo is the backbone. fct_team_fixture carries the rating AT KICKOFF, so
-      it is point-in-time by construction and needs no windowing — the only
-      feature in this layer free of the leakage question entirely. It also
-      solves the promoted-club problem: a newly promoted side has no Premier
-      League history but does have an Elo, so it starts with a defensible
-      prior rather than a null.
-
-      xG for and against are summed from player rows, since fct_team_fixture
-      carries goals but not xG. Rolling rates are LEAGUE ONLY.
-    tests:
-      - dbt_utils.unique_combination_of_columns:
-          arguments:
-            combination_of_columns: [snapshot_id, team_code]
-    columns:
-      - name: snapshot_id
-        tests: [not_null]
-      - name: team_code
-        tests: [not_null]
-      - name: elo_current
+          This is the feature that separates a benching from a league-wide
+          pause. During a break every player's raw gap is large, but this
+          stays near zero for everyone who played the last fixture before it.
+      - name: follows_break
         description: >
-          Elo at the club's most recent fixture before this deadline. Current
-          strength with no hindsight, and the GW1 prior for promoted clubs.
-        tests:
-          - dbt_utils.accepted_range:
-              arguments:
-                min_value: 1000
-                max_value: 2500
-                config:
-                  where: "elo_current is not null"
-      - name: xg_against_per_match_10
-        description: >
-          The primary input to clean-sheet probability, before opponent
-          adjustment.
-        tests:
-          - dbt_utils.accepted_range:
-              arguments:
-                min_value: 0
-                max_value: 6
-                config:
-                  where: "xg_against_per_match_10 is not null"
-                  severity: warn
-      - name: clean_sheet_rate_10
-        tests:
-          - dbt_utils.accepted_range:
-              arguments:
-                min_value: 0
-                max_value: 1
-                config:
-                  where: "clean_sheet_rate_10 is not null"
-      - name: is_cold_start
-        description: >
-          No league fixtures as at this deadline — GW1, or a promoted club.
-          elo_current remains usable in both cases.
+          The club's last fixture was more than 14 days before this deadline.
+          Three occur a season, so the model has few examples and benefits
+          from being told rather than inferring it from a continuous variable.
         tests: [not_null]
 
   - name: feat_training_set
