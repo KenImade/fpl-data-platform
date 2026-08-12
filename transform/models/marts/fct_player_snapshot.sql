@@ -47,13 +47,29 @@ select
     p.web_name,
     p.position,
 
-    -- The volatile four: what a manager could actually know at the deadline.
-    -- Everything else about a player is either static or an outcome.
     p.price_tenths,
     p.selected_by_percent,
     p.status,
     p.news,
     p.chance_of_playing_next,
+
+    -- Squad membership. NULL in captures predating these fields — absence is
+    -- not the same as false, which is why the spine coalesces rather than
+    -- filtering on them directly.
+    p.removed,
+    p.can_select,
+
+    -- Set-piece duty at the deadline. Deadline-known state: a penalty taker's
+    -- goal expectation differs materially from a teammate with identical xG.
+    p.penalties_order,
+    p.direct_freekicks_order,
+    p.corners_order,
+
+    -- When the news flag was set. A flag raised at Friday's press conference
+    -- means something different from one standing since August.
+    p.news_added,
+    extract(epoch from (s.deadline_utc - p.news_added)) / 3600
+                                                    as hours_since_news_added,
 
     -- FPL's own projection, as at the deadline. The baseline any model has
     -- to beat, captured at the same instant the model's features were.
@@ -63,6 +79,13 @@ select
     -- feature for this exact reason; differencing them is not (ADR 0005).
     p.cumulative_points,
     p.cumulative_minutes,
+    p.cumulative_starts,
+    -- Pre-season captures carry the PREVIOUS season's totals until FPL rolls
+    -- the bootstrap over. A GW1 snapshot may therefore hold last season's
+    -- figures rather than zeroes. This is a heuristic on gameweek, not a
+    -- detection of the rollover itself — verify against cumulative_points
+    -- before relying on it.
+    s.gameweek = 1                                  as maybe_prior_season_cumulative,
 
     current_timestamp                               as built_at
 

@@ -42,15 +42,25 @@ class Element(BaseModel):
     element_type: int
     team: int
     team_code: int
+    team_join_date: str | None = None
+    penalties_order: int | None = None
+    direct_freekicks_order: int | None = None
+    corner_and_indirect_freekicks_order: int | None = None
     now_cost: int
     status: str
     news: str
+    news_added: str | None = None
+    starts: int | None = None
+    removed: bool | None = None
+    can_select: bool | None = None
     chance_of_playing_next_round: int | None = None
     chance_of_playing_this_round: int | None = None
     total_points: int
     event_points: int
     minutes: int
     selected_by_percent: str
+    has_temporary_code: bool | None = None
+    opta_code: str | None = None
     ep_next: str | None = None
     ep_this: str | None = None
 
@@ -68,13 +78,10 @@ KNOWN_UNMAPPED = frozenset(
         "birth_date",
         "bonus",
         "bps",
-        "can_select",
         "can_transact",
         "clean_sheets",
         "clean_sheets_per_90",
         "clearances_blocks_interceptions",
-        "corners_and_indirect_freekicks_order",
-        "corners_and_indirect_freekicks_text",
         "cost_change_event",
         "cost_change_event_fall",
         "cost_change_start",
@@ -84,7 +91,6 @@ KNOWN_UNMAPPED = frozenset(
         "creativity_rank_type",
         "defensive_contribution",
         "defensive_contribution_per_90",
-        "direct_freekicks_order",
         "direct_freekicks_text",
         "dreamteam_count",
         "expected_assists",
@@ -101,7 +107,6 @@ KNOWN_UNMAPPED = frozenset(
         "goals_conceded",
         "goals_conceded_per_90",
         "goals_scored",
-        "has_temporary_code",
         "ict_index",
         "ict_index_rank",
         "ict_index_rank_type",
@@ -110,13 +115,10 @@ KNOWN_UNMAPPED = frozenset(
         "influence_rank",
         "influence_rank_type",
         "known_name",
-        "news_added",
         "now_cost_rank",
         "now_cost_rank_type",
-        "opta_code",
         "own_goals",
         "penalties_missed",
-        "penalties_order",
         "penalties_saved",
         "penalties_text",
         "photo",
@@ -127,7 +129,6 @@ KNOWN_UNMAPPED = frozenset(
         "recoveries",
         "red_cards",
         "region",
-        "removed",
         "saves",
         "saves_per_90",
         "scout_news_link",
@@ -136,10 +137,8 @@ KNOWN_UNMAPPED = frozenset(
         "selected_rank_type",
         "special",
         "squad_number",
-        "starts",
         "starts_per_90",
         "tackles",
-        "team_join_date",
         "threat",
         "threat_rank",
         "threat_rank_type",

@@ -1,0 +1,497 @@
+version: 2
+
+models:
+  - name: feat_player_fixture_spine
+    description: >
+      Every player who COULD have played, crossed with the fixtures they
+      could have played in. One row per player per league fixture their club
+      contested in that gameweek.
+
+      This exists because fct_player_gw is appearance-driven: a player left
+      out of the squad has no row there, so non-appearance is a missing row
+      rather than a zero. Non-appearance is the majority of the signal for
+      P(play), so training on the fact alone means training only on players
+      who played — which is the outcome being predicted.
+
+      Squad membership comes from fct_player_snapshot, making the roster
+      point-in-time correct by construction: a player signed after the
+      deadline is not here, and neither is one whose club had no fixture.
+
+      Rows exist only where a usable deadline snapshot does. Captures begin
+      partway through coverage, so 2024/25 is absent entirely. That is the
+      binding constraint on training set size, not a filter to be relaxed.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [snapshot_id, player_id, match_id]
+    columns:
+      - name: snapshot_id
+        description: The deadline this row's features are known as at.
+        tests: [not_null]
+      - name: player_id
+        tests: [not_null]
+      - name: match_id
+        description: >
+          The fixture being predicted. A double gameweek gives a player two
+          rows here and both are legitimate targets.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_matches')
+                field: match_id
+      - name: team_code
+        description: >
+          The player's club as at the deadline, from the capture rather than
+          from stg_players — so mid-season transfers resolve correctly here
+          even though they do not in fct_player_gw.
+        tests: [not_null]
+      - name: opponent_code
+        description: Always populated — league fixtures only.
+        tests: [not_null]
+      - name: is_home
+        tests: [not_null]
+      - name: fixtures_in_gw
+        description: >
+          League fixtures this player's club plays in this gameweek. 2 marks
+          a double.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+                max_value: 3
+      - name: did_appear
+        description: >
+          THE PRIMARY LABEL. False where the player was in the squad at the
+          deadline but has no row in fct_player_gw for this fixture.
+        tests: [not_null]
+      - name: minutes
+        description: Zero rather than NULL where the player did not appear.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 120
+      - name: played_60
+        description: >
+          The appearance-points threshold, and the boundary that matters for
+          clean sheets.
+        tests: [not_null]
+      - name: gw_points
+        description: >
+          Gameweek-level, so NULL on the second fixture of a double. Inherits
+          the allocation limit documented in ADR 0005.
+
+  - name: feat_player_form
+    description: >
+      A player's recent league output, as at each deadline. One row per
+      player per gameweek — NOT per fixture. A double gameweek fans this out
+      across both fixtures when joined to the spine, which is correct: a
+      manager knows the same thing about a player before both matches.
+
+      THE BOUNDARY IS THE DEADLINE, NOT THE KICKOFF. Bounding windows on the
+      target fixture's kickoff would look correct and leak — a Thursday
+      European tie falls after the deadline but before Sunday's league match.
+      That is the most likely leak in this layer and the reason no window
+      here uses a rows-preceding frame.
+
+      LEAGUE ONLY. Champions League xG against a weaker opponent is not
+      comparable to Premier League xG. All-competition minutes are fatigue,
+      not form, and live in feat_player_load.
+
+      Rates are per 90 and shrunk toward a positional prior with a weight of
+      270 minutes, so a 20-minute cameo cannot produce a 13.5 goals-per-90
+      striker. Both shrunk and unshrunk versions are carried; the difference
+      between them is itself informative.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [snapshot_id, player_id]
+    columns:
+      - name: snapshot_id
+        tests: [not_null]
+      - name: player_id
+        tests: [not_null]
+      - name: last_appearance_at
+        description: >
+          Kickoff of the most recent league appearance before this deadline.
+          NULL for a cold start. The point-in-time guarantee made checkable —
+          see tests/no_post_deadline_leakage.sql.
+      - name: days_since_last_appearance
+        description: >
+          Staleness of the form window. A ten-fixture window can reach back
+          two months for a returning player; this is what lets the model
+          discount a stale rate rather than SQL deciding for it.
+      - name: is_cold_start
+        description: >
+          No league appearances at all as at this deadline — a new signing, a
+          promoted club's squad player, or GW1. An explicit flag rather than
+          leaving the model to infer it from a wall of nulls.
+        tests: [not_null]
+      - name: minutes_5
+        description: League minutes across the last 5 appearances.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 600
+                config:
+                  where: "minutes_5 is not null"
+      - name: xgi_per_90_shrunk_5
+        description: >
+          Expected goal involvements per 90, blended toward the positional
+          prior. The primary attacking-rate feature.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 3
+                config:
+                  where: "xgi_per_90_shrunk_5 is not null"
+                  severity: warn
+      - name: prior_xgi_per_90
+        description: >
+          League-wide per-90 rate for this position as at this deadline. The
+          fallback for a cold-start row. Noisy in the opening gameweeks,
+          where it is computed off one or two rounds of fixtures.
+
+  - name: feat_player_load
+    description: >
+      Fatigue and rotation risk, as at each deadline. One row per player per
+      gameweek.
+
+      ALL COMPETITIONS, deliberately — the mirror of feat_player_form. A
+      Thursday Europa tie is exactly the load that causes Sunday rotation,
+      and fct_player_gw carries it because the fact was built at fixture
+      grain across every competition for this purpose.
+
+      PER-PLAYER, NOT PER-TEAM. "The club played Thursday" is a weak proxy;
+      "this player played 90 minutes on Thursday" is close to the causal
+      variable. Individual European minutes are the strongest edge available
+      in the minutes model, and most public FPL models lack them because they
+      ingest only the FPL API.
+
+      Windows are intervals rather than fixture counts — load decays with
+      elapsed days, the opposite choice to feat_player_form. Friendlies are
+      excluded; counting them would show a pre-season squad as critically
+      fatigued.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [snapshot_id, player_id]
+    columns:
+      - name: snapshot_id
+        tests: [not_null]
+      - name: player_id
+        tests: [not_null]
+      - name: minutes_7d
+        description: >
+          Zero rather than NULL for a player with no fixtures in the window —
+          they genuinely have no load. The opposite convention to
+          feat_player_form, where absence means unknown.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 360
+      - name: non_league_minutes_14d
+        description: >
+          European and cup minutes. The rotation signal proper — league
+          minutes in the same window predict selection, these predict rest.
+        tests: [not_null]
+      - name: last_fixture_at
+        description: >
+          Kickoff of the most recent fixture in any competition before this
+          deadline. Asserted below the deadline by the leakage test.
+      - name: last_fixture_was_non_league
+        description: >
+          Midweek European or cup tie immediately preceding this deadline.
+          The single most direct rotation signal available.
+        tests: [not_null]
+      - name: acute_chronic_ratio
+        description: >
+          Recent load against the established baseline (7-day rate scaled to
+          28 days, over actual 28-day load). Above 1 means a spike. NULL
+          where there is no 28-day baseline.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 4
+                config:
+                  where: "acute_chronic_ratio is not null"
+                  severity: warn
+      - name: team_matches_prior_14d
+        description: >
+          Club-level congestion, whether or not this player featured. Signed
+          OPPOSITE to the player's own load: a squad player at a congested
+          club is a rotation beneficiary. Both are needed.
+      - name: status
+        description: >
+          FPL availability flag at the deadline. The strongest single
+          predictor of non-appearance.
+
+  - name: feat_team_strength
+    description: >
+      Attacking and defensive strength, as at each deadline. One row per club
+      per gameweek.
+
+      Elo is the backbone. fct_team_fixture carries the rating AT KICKOFF, so
+      it is point-in-time by construction and needs no windowing — the only
+      feature in this layer free of the leakage question entirely. It also
+      solves the promoted-club problem: a newly promoted side has no Premier
+      League history but does have an Elo, so it starts with a defensible
+      prior rather than a null.
+
+      xG for and against are summed from player rows, since fct_team_fixture
+      carries goals but not xG. Rolling rates are LEAGUE ONLY.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [snapshot_id, team_code]
+    columns:
+      - name: snapshot_id
+        tests: [not_null]
+      - name: team_code
+        tests: [not_null]
+      - name: elo_current
+        description: >
+          Elo at the club's most recent fixture before this deadline. Current
+          strength with no hindsight, and the GW1 prior for promoted clubs.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1000
+                max_value: 2500
+                config:
+                  where: "elo_current is not null"
+      - name: xg_against_per_match_10
+        description: >
+          The primary input to clean-sheet probability, before opponent
+          adjustment.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 6
+                config:
+                  where: "xg_against_per_match_10 is not null"
+                  severity: warn
+      - name: clean_sheet_rate_10
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+                config:
+                  where: "clean_sheet_rate_10 is not null"
+      - name: is_cold_start
+        description: >
+          No league fixtures as at this deadline — GW1, or a promoted club.
+          elo_current remains usable in both cases.
+        tests: [not_null]
+
+  - name: feat_training_set
+    description: >
+      The assembled matrix. One row per player per fixture they could have
+      played in, with every feature and every label.
+
+      FEATURES ARE LEFT OF THE DEADLINE, LABELS RIGHT OF IT. Every feature
+      column traces back to fct_player_snapshot or to a window bounded on
+      deadline_utc. Nothing reads stg_player_gameweek_stats except as a
+      label. That property is the only one about this model that matters, and
+      tests/no_post_deadline_leakage.sql is what asserts it.
+
+      Opponent strength joins on the OPPONENT's team_code. Inverting that
+      would silently reverse every fixture-difficulty feature while producing
+      no error, which is why the join is spelled out rather than aliased
+      loosely.
+
+      Expect roughly 20k rows per season with did_appear true on 40-50%. A
+      much higher appearance rate means the spine is dropping
+      non-appearances; much lower means it is including players who were
+      never plausible selections.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [snapshot_id, player_id, match_id]
+    columns:
+      - name: snapshot_id
+        tests: [not_null]
+      - name: player_id
+        tests: [not_null]
+      - name: match_id
+        tests: [not_null]
+      - name: position
+        description: >
+          Determines scoring for every component — goal value, clean sheet
+          eligibility, defensive contribution threshold. Rows with a null
+          position cannot be scored and should be excluded from training.
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['GKP', 'DEF', 'MID', 'FWD']
+      - name: opponent_elo
+        description: >
+          From feat_team_strength joined on opponent_code. If this correlates
+          positively with the player's own returns, the join has been
+          inverted.
+      - name: ep_next
+        description: >
+          FPL's own projection, captured at the same instant as the features.
+          The baseline to beat — but flat before a season starts, so rank
+          correlation against it is meaningless until around GW4.
+      - name: minutes_band
+        description: >
+          THE PRIMARY TARGET. 0 = did not play, 1 = 1-59 minutes, 2 = 60+.
+          Ordinal, and the three bands are the ones the scoring rules care
+          about.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1, 2]
+      - name: did_appear
+        tests: [not_null]
+      - name: gw_points
+        description: >
+          Gameweek-level label. NULL on the second fixture of a double, so
+          any model trained on it must filter to primary rows.
+      - name: gw_bps
+        description: >
+          The bonus model's target. Deterministic given recorded stats, so
+          more predictable than most components — but gameweek-level, so
+          train on single-fixture gameweeks only.
+  
+  - name: feat_player_fixture_spine_historical
+    description: >
+      The same shape as feat_player_fixture_spine, reconstructed for seasons
+      that predate our own captures.
+
+      The live spine takes its roster from fct_player_snapshot, which exists
+      only where a deadline capture does. Captures begin in 2026/27, so
+      2025/26 — the only season with completed fixtures, and therefore the
+      only source of labels — produces no rows there. Without this model
+      there is no supervised training data at all.
+
+      THE ROSTER IS THE SEASON SQUAD, NOT THE GAMEWEEK SQUAD. stg_players
+      carries one row per player per season, so a January signing appears
+      from GW1 and a January departure appears through GW38. Bounding the
+      roster by first and last observed appearance would remove them, but
+      that decides availability using information from after the deadline —
+      precisely the leak this layer exists to prevent. The rows stay and
+      prior_appearances on feat_player_gameweek_spine carries the signal
+      instead.
+
+      Consequence: the unconditional appearance rate here sits far below the
+      live spine's 30-60% band. Filter on had_appeared_before before reading
+      anything into it.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [snapshot_id, player_id, match_id]
+    columns:
+      - name: snapshot_id
+        description: >
+          Constructed to match fct_deadline_snapshot's format, so both spines
+          share a key space and can be unioned without translating identifiers.
+        tests: [not_null]
+      - name: player_id
+        tests: [not_null]
+      - name: match_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_matches')
+                field: match_id
+      - name: team_code
+        description: >
+          From stg_players, so this is the club recorded for the season rather
+          than as at the deadline. A mid-season transfer is misattributed here
+          in a way it is not on the live path.
+        tests: [not_null]
+      - name: is_reconstructed
+        description: >
+          Always true. Present so a union with the live spine keeps the
+          distinction visible.
+        tests: [not_null]
+      - name: did_appear
+        tests: [not_null]
+      - name: minutes
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 120
+
+  - name: feat_player_gameweek_spine
+    description: >
+      One row per player per gameweek, across both the live and reconstructed
+      paths. The single roster the window models join to.
+
+      feat_player_form, feat_player_load and feat_team_strength are grained
+      per gameweek and all need to know which players existed at which
+      deadline. Reading fct_player_snapshot directly means they produce
+      nothing for seasons predating captures, leaving the historical spine's
+      labelled rows with no features attached.
+
+      The fixture-grain spines collapse to this grain because a double
+      gameweek does not change what a manager knew at the deadline. Fanning
+      back out to fixture grain happens in feat_training_set.
+
+      NO CAPTURE-SOURCED STATE. Price, status, news, chance_of_playing_next
+      and ep_next exist on the live path only. Emitting them as null here
+      would blur "this feature does not exist for this season" into "this
+      player had no news" — two different things a model cannot separate once
+      both are null. They are joined in at feat_training_set instead, where
+      their absence lines up with a season boundary a reader can see.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [snapshot_id, player_id]
+    columns:
+      - name: snapshot_id
+        tests: [not_null]
+      - name: player_id
+        tests: [not_null]
+      - name: position
+        description: >
+          Determines every scoring rule. Rows with a null position cannot be
+          scored and are excluded upstream on the reconstructed path.
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['GKP', 'DEF', 'MID', 'FWD']
+      - name: prior_appearances
+        description: >
+          League appearances strictly before this deadline, counted distinct on
+          match_id. Zero is meaningful rather than missing: a player with no
+          prior appearance is usually not yet signed, not registered, or not in
+          the manager's plans, and their appearance rate is roughly an order of
+          magnitude lower than an established starter's.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 38
+      - name: had_appeared_before
+        description: >
+          prior_appearances > 0. The flag that makes the reconstructed path's
+          inflated negative class interpretable.
+        tests: [not_null]
+      - name: last_appearance_at
+        description: >
+          Kickoff of the most recent prior league appearance. NULL where there
+          is none. Asserted below deadline_utc by the leakage test.
+      - name: is_reconstructed
+        description: >
+          True where the row was rebuilt from published deadlines rather than
+          from a capture. Capture-sourced features are structurally
+          unavailable for these rows, not merely null — any model training
+          across both paths must carry this or drop those columns.
+        tests: [not_null]

@@ -3,7 +3,7 @@ fpl:
   outputs:
     default:
       type: postgres
-      host: "{{ env_var('DBT_DB_HOST', 'postgres') }}"
+      host: "{{ env_var('DBT_DB_HOST', 'localhost') }}"
       port: "{{ env_var('DBT_DB_PORT', '5432') | int }}"
       user: "{{ env_var('DBT_DB_USER', 'fpl') }}"
       password: "{{ env_var('DBT_DB_PASSWORD', 'fpl') }}"

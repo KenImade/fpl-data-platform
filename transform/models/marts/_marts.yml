@@ -28,6 +28,12 @@ models:
               arguments:
                 min_value: 0
                 max_value: 120
+                config:
+                  # Friendlies do not follow match-length conventions —
+                  # pre-season fixtures run long and squads split across two
+                  # games. The 120 ceiling is a rule about competitive
+                  # football, so it is asserted only where it applies.
+                  where: "competition != 'friendly'"
       - name: match_id
         tests:
           - relationships:

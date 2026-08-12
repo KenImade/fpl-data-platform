@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 NORMAL_INTERVAL = timedelta(hours=3)
-TIGHT_INERVAL = timedelta(minutes=15)
+TIGHT_INTERVAL = timedelta(minutes=15)
 TIGHT_WINDOW = timedelta(hours=6)
 
 
@@ -33,7 +33,7 @@ def decide(
     deadline = next_deadline(now, deadlines)
 
     if deadline is not None and (deadline - now) <= TIGHT_WINDOW:
-        interval = TIGHT_INERVAL
+        interval = TIGHT_INTERVAL
         window = "deadline"
     else:
         interval = NORMAL_INTERVAL

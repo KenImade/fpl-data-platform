@@ -160,6 +160,7 @@ services:
         limits: { memory: 512M }
 
   dagster-daemon:
+    init: true
     build:
       context: .
       dockerfile: Dockerfile
@@ -184,9 +185,10 @@ services:
         # subprocess INSIDE this container. This ceiling covers the daemon
         # plus all concurrent runs. Size it against your worst backfill, or
         # move to DockerRunLauncher so runs get their own limits.
-        limits: { memory: 4G }
+        limits: { memory: 4G, pids: 8192 }
 
   dagster-web:
+    init: true
     build:
       context: .
       dockerfile: Dockerfile
