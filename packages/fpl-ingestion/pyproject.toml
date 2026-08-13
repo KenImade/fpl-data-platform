@@ -17,8 +17,10 @@ dependencies = [
     "dagster-webserver>=1.13.15",
     "dbt-core>=1.11,<1.12",
     "dbt-postgres>=1.11,<1.12",
+    "fpl-modelling",
     "httpx>=0.28.1",
     "polars>=1.43.1",
+    "psycopg[binary]>=3.3.4",
     "pyarrow>=25.0.0",
 ]
 
@@ -28,3 +30,6 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = []
+
+[tool.uv.sources]
+fpl-modelling = { workspace = true }

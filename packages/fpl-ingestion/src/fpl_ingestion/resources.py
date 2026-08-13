@@ -27,6 +27,7 @@ from pathlib import Path
 import boto3
 from dagster import ConfigurableResource, EnvVar
 
+from fpl_ingestion.client import make_client
 from fpl_ingestion.storage import LocalStore, S3Store, Store
 
 LOCAL_CAPTURE_DIR = Path("local-capture")
@@ -97,6 +98,19 @@ class PostgresResource(ConfigurableResource):
         return self.url
 
 
+class FplClientResource(ConfigurableResource):
+    """HTTP identity for outbound requests.
+
+    Declared rather than read from os.environ inside each op, so a missing
+    User-Agent fails at code-location load instead of on the first run.
+    """
+
+    user_agent: str
+
+    def client(self):
+        return make_client(self.user_agent)
+
+
 STORE = StoreResource(
     endpoint_url=EnvVar("S3_ENDPOINT_URL"),
     access_key_id=EnvVar("S3_ACCESS_KEY_ID"),
@@ -105,3 +119,5 @@ STORE = StoreResource(
 )
 
 POSTGRES = PostgresResource(url=EnvVar("DATABASE_URL"))
+
+FPL_CLIENT = FplClientResource(user_agent=EnvVar("USER_AGENT"))
