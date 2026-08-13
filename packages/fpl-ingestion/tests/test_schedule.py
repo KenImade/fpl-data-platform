@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from fpl_ingestion.schedule import (
     NORMAL_INTERVAL,
-    TIGHT_INERVAL,
+    TIGHT_INTERVAL,
     TIGHT_WINDOW,
     decide,
     next_deadline,
@@ -79,14 +79,14 @@ def test_next_deadline_returns_none_when_all_are_past():
             BASE - timedelta(minutes=16),
             [BASE + timedelta(hours=3)],
             True,
-            TIGHT_INERVAL,
+            TIGHT_INTERVAL,
         ),
         (
             "14m elapsed, deadline in 3h",
             BASE - timedelta(minutes=14),
             [BASE + timedelta(hours=3)],
             False,
-            TIGHT_INERVAL,
+            TIGHT_INTERVAL,
         ),
         (
             "20m elapsed, deadline in 7h",
@@ -100,7 +100,7 @@ def test_next_deadline_returns_none_when_all_are_past():
             BASE - timedelta(minutes=16),
             [BASE + TIGHT_WINDOW],
             True,
-            TIGHT_INERVAL,
+            TIGHT_INTERVAL,
         ),
         (
             "deadline 1 second past, next one used",
@@ -110,7 +110,7 @@ def test_next_deadline_returns_none_when_all_are_past():
                 BASE + timedelta(hours=5),
             ],
             True,
-            TIGHT_INERVAL,
+            TIGHT_INTERVAL,
         ),
         (
             "all deadlines in the past",

@@ -45,7 +45,7 @@ class Element(BaseModel):
     team_join_date: str | None = None
     penalties_order: int | None = None
     direct_freekicks_order: int | None = None
-    corner_and_indirect_freekicks_order: int | None = None
+    corners_and_indirect_freekicks_order: int | None = None
     now_cost: int
     status: str
     news: str
@@ -82,6 +82,7 @@ KNOWN_UNMAPPED = frozenset(
         "clean_sheets",
         "clean_sheets_per_90",
         "clearances_blocks_interceptions",
+        "corners_and_indirect_freekicks_text",
         "cost_change_event",
         "cost_change_event_fall",
         "cost_change_start",

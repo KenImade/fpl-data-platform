@@ -63,7 +63,7 @@ renamed as (
         -- materially from a teammate with identical xG per 90.
         penalties_order,
         direct_freekicks_order,
-        corner_and_indirect_freekicks_order        as corners_order,
+        corners_and_indirect_freekicks_order        as corners_order,
 
         -- When `news` was set. A flag added an hour before a deadline means
         -- something different from one standing since August.
