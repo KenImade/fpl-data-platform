@@ -9,7 +9,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from fpl_api import VERSION, db, errors, ratelimit
 from fpl_api.logging import configure as configure_logging
-from fpl_api.routers import fixtures, gameweeks, health, players, teams
+from fpl_api.routers import (
+    fixtures,
+    gameweeks,
+    health,
+    players,
+    predictions,
+    teams,
+)
 
 configure_logging()
 
@@ -53,5 +60,12 @@ app.add_middleware(
 )
 
 
-for r in (health.router, teams.router, gameweeks.router, players.router, fixtures.router):
+for r in (
+    health.router,
+    teams.router,
+    gameweeks.router,
+    players.router,
+    fixtures.router,
+    predictions.router,
+):
     app.include_router(r)
