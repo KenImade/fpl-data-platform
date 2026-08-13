@@ -25,3 +25,39 @@ sources:
       - name: ci_players
       - name: ci_teams
       - name: ci_gameweek_summaries
+  
+  - name: predictions
+    schema: predictions
+    description: >
+      Written by the fpl_modelling package, read here. This is the one place
+      dbt does not own the tables it reads — the modelling role creates and
+      writes them, and dbt has select only.
+
+      That direction matters. The API reads marts built on top of these rather
+      than the tables themselves, so the model's storage shape and the public
+      contract can change independently.
+    tables:
+      - name: player_gameweek
+        description: >
+          One row per player per fixture per model version. Versions coexist
+          deliberately: a challenger can be scored against the same snapshot as
+          the incumbent, and "what did we predict at the time" stays
+          answerable. predictions.active_model decides which one is served.
+        columns:
+          - name: snapshot_id
+            description: >
+              The feature state this prediction was made from. Rebuild it,
+              rerun the version, and the row should be identical.
+          - name: model_version
+            description: >
+              Identifies the code and the training data together, so two
+              versions can be compared on which of the two changed.
+          - name: p_minutes_60
+            description: >
+              Probability of reaching the 60-minute appearance threshold. The
+              single most load-bearing number the model produces.
+      - name: active_model
+        description: >
+          One row per model name, naming the version the marts serve.
+          Promotion is a deliberate act — the training job does not write here,
+          because a model that promotes itself ships its own regressions.

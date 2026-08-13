@@ -257,3 +257,175 @@ models:
           - accepted_values:
               arguments:
                 values: ['GKP', 'DEF', 'MID', 'FWD']
+  
+  - name: mart_player_fixture_predictions
+    description: >
+      Model output shaped for the API, at fixture grain. One row per player per
+      league fixture, so a double gameweek gives a player two rows.
+
+      This layer exists so that predictions.player_gameweek is not itself the
+      public contract. Without it, every column rename in the modelling package
+      would break third-party consumers, and "the API reads marts" would be
+      approximately rather than literally true.
+
+      ONE VERSION, CHOSEN DELIBERATELY. predictions.player_gameweek holds every
+      version so a challenger can be scored against the same snapshot as the
+      incumbent. Serving latest-by-timestamp would throw that away — a training
+      run would silently change what consumers receive. predictions.active_model
+      names the served version and promotion is a separate act.
+
+      Most components are null: only the minutes model exists so far. A null
+      means no model has been built for that component, not a prediction of
+      zero, and the API schema says so.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [season, gameweek, player_id, match_id]
+    columns:
+      - name: season
+        tests: [not_null]
+      - name: gameweek
+        tests: [not_null]
+      - name: player_id
+        tests: [not_null]
+      - name: match_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_matches')
+                field: match_id
+      - name: position
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['GKP', 'DEF', 'MID', 'FWD']
+      - name: p_minutes_60
+        description: >
+          Probability of reaching the 60-minute appearance threshold in this
+          fixture. The most load-bearing number the model produces: clean
+          sheet points and the second appearance point both hang off it.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: p_minutes_0
+        description: Probability of not appearing at all.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: e_minutes
+        description: >
+          Expected minutes, from band midpoints rather than band labels. What
+          the attacking components multiply their per-90 rates by.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 90
+      - name: is_cold_start
+        description: >
+          No prior league appearances this season. The prediction is a
+          positional prior rather than an estimate from this player's history,
+          and a consumer building a transfer tool deserves to know which they
+          are reading.
+        tests: [not_null]
+      - name: snapshot_id
+        description: >
+          The feature state this prediction was made from. Rebuild it, rerun
+          the version, and the row should come back identical.
+        tests: [not_null]
+      - name: model_version
+        tests: [not_null]
+      - name: opponent_name
+        description: >
+          NULL only where the fixture join failed, which should not happen for
+          league fixtures. A null here is worth investigating rather than
+          serving.
+
+  - name: mart_player_gameweek_predictions
+    description: >
+      The API's default prediction surface. One row per player per gameweek,
+      aggregated across fixtures.
+
+      A double gameweek gives a player two fixtures, and a consumer asking how
+      many points someone will score in GW26 wants one number. Serving fixture
+      grain by default would make every consumer implement the aggregation, and
+      most would forget — producing tools that silently halve a projection in
+      exactly the gameweeks where it matters most.
+
+      EXPECTATIONS SUM, PROBABILITIES DO NOT. E[goals across both] is the sum by
+      linearity, whether or not the fixtures are independent. P(60+ minutes) is
+      not: what a consumer wants is the probability of clearing the threshold in
+      at least one fixture, computed here as 1 - prod(1 - p) under
+      independence.
+
+      Independence is not quite right — a player injured in the first fixture
+      misses the second — so double-gameweek probabilities are slightly
+      overstated. That is documented rather than corrected, because correcting
+      it needs a joint model the data does not support. Per-fixture
+      probabilities remain available unaggregated at fixture grain.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [season, gameweek, player_id]
+    columns:
+      - name: season
+        tests: [not_null]
+      - name: gameweek
+        tests: [not_null]
+      - name: player_id
+        tests: [not_null]
+      - name: fixtures_in_gw
+        description: >
+          League fixtures this player's club plays this gameweek. 2 marks a
+          double; 0 does not occur here, since a player with no fixture has no
+          row rather than a zeroed one.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+                max_value: 3
+      - name: is_double_gw
+        tests: [not_null]
+      - name: p_minutes_60
+        description: >
+          Probability of reaching 60 minutes in AT LEAST ONE fixture. For a
+          single gameweek this equals the fixture-level figure; for a double it
+          is strictly higher than either fixture alone, which is the property
+          the aggregation exists to produce.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: e_minutes
+        description: >
+          Summed across fixtures, so a double gameweek can exceed 90. That is
+          correct — two matches is two chances to accumulate minutes.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 180
+      - name: opponents
+        description: >
+          Comma-separated, with (H) or (A), ordered by kickoff. A double
+          gameweek lists both — a fixture ticker needs them in order.
+      - name: is_cold_start
+        description: >
+          True if the player is cold-start in any fixture this gameweek.
+        tests: [not_null]
+      - name: snapshot_id
+        tests: [not_null]
+      - name: model_version
+        tests: [not_null]
