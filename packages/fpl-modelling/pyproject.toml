@@ -8,11 +8,13 @@ authors = [
 ]
 requires-python = ">=3.13,<3.14"
 dependencies = [
+    "boto3>=1.43.57",
     "connectorx>=0.4.5",
     "lightgbm>=4.7.0",
     "numpy>=2.5.2",
     "pandas>=3.0.5",
     "polars>=1.43.1",
+    "psycopg[binary]>=3.3.4",
     "pyarrow>=25.0.0",
 ]
 
