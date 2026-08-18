@@ -26,6 +26,10 @@ FROM python:3.13-slim-bookworm
 RUN useradd -m app
 WORKDIR /app
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=build --chown=app /app /app
 COPY --chown=app rulesets/ rulesets/
 COPY --chown=app transform/ transform/
