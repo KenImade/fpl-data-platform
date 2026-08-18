@@ -55,6 +55,9 @@ IDENTITY = (
     "kickoff_utc",
     "team_code",
     "opponent_code",
+    "last_appearance_at",
+    "last_fixture_at",
+    "club_last_fixture_at",
     "built_at",
 )
 
@@ -251,6 +254,8 @@ def prepare(df: pl.DataFrame, features: list[str]) -> pl.DataFrame:
             exprs.append(pl.col(col).cast(pl.Categorical))
         elif dtype == pl.Boolean:
             exprs.append(pl.col(col).cast(pl.Int8))
+        elif dtype == pl.Decimal:
+            exprs.append(pl.col(col).cast(pl.Float64))
         else:
             exprs.append(pl.col(col))
     return df.with_columns(exprs)

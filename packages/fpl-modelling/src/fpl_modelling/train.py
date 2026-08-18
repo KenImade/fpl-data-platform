@@ -141,8 +141,8 @@ def _store() -> Any:
     return boto3.client(
         "s3",
         endpoint_url=os.environ.get("S3_ENDPOINT_URL", "http://localhost:9000"),
-        aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID", "minioadmin"),
-        aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY", "minioadmin"),
+        aws_access_key_id=os.environ.get("S3_ACCESS_KEY_ID", "minioadmin"),
+        aws_secret_access_key=os.environ.get("S3_SECRET_ACCESS_KEY", "minioadmin"),
     )
 
 
