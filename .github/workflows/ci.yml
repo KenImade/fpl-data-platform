@@ -1,54 +1,161 @@
 name: CI
 
 on:
+  # Every branch, plus PRs. A push to a branch with an open PR triggers both,
+  # but the concurrency group below cancels the duplicate rather than paying
+  # for it twice.
   push:
-    branches:
-      - main
-      - "**"
   pull_request:
+  # Lets the docs be rebuilt without a code change — useful when the dbt
+  # manifest changes but no Python does.
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Pin so a uv release cannot change resolution behaviour mid-week.
+  UV_VERSION: "0.5.11"
+
 jobs:
-  check:
+  # ---------------------------------------------------------------------------
+  # format — fixes rather than complains, where it safely can
+  # ---------------------------------------------------------------------------
+  format:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The default checkout is a detached HEAD at the merge commit, which
+          # cannot be pushed back to. Checking out the branch by name is what
+          # makes the commit-back below possible.
+          ref: ${{ github.head_ref || github.ref_name }}
+          # A token that can trigger downstream workflows. The default
+          # GITHUB_TOKEN deliberately cannot, so a commit made with it does not
+          # re-run CI — meaning a formatted commit would go untested.
+          token: ${{ secrets.CI_PUSH_TOKEN || secrets.GITHUB_TOKEN }}
 
       - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
 
       - run: uv sync --all-packages
 
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
-      - run: uv run mypy
-      - run: uv run pytest -q
+      # Both fixers, then a single commit. ruff check --fix handles import
+      # sorting and the other safe autofixes; ruff format handles layout.
+      #
+      # --fix only, never --unsafe-fixes: an unsafe fix can change behaviour,
+      # and a bot silently altering semantics is worse than a red build.
+      - name: Apply fixes
+        run: |
+          uv run ruff check --fix .
+          uv run ruff format .
 
+      # Generated files are regenerated here rather than checked, so the two
+      # things that can be mechanically derived are derived in one place.
       - name: Regenerate generated files
         run: |
           uv run python scripts/export_openapi.py
           uv run python scripts/gen_data_dictionary.py
 
-      - name: Ensure generated files are committed
+      - name: Commit fixes
+        id: commit
         run: |
-          git diff --exit-code -- \
-            docs/src/openapi.json \
-            docs/src/content/docs/data/dictionary.md
+          if git diff --quiet; then
+            echo "nothing to fix"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
-  docs:
-    needs: check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "style: apply ruff and regenerate docs sources
+
+          Automated by CI. Run \`just fmt\` locally to avoid this commit."
+          git push
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      # If a fix was pushed, this run is now testing stale code. Stopping here
+      # is honest: the push has already triggered a fresh run against the
+      # corrected tree, and letting this one continue would report a result for
+      # a commit nobody will look at.
+      - name: Stop if fixes were pushed
+        if: steps.commit.outputs.changed == 'true'
+        run: |
+          echo "::notice::Formatting fixes pushed — a new run will follow."
+          exit 1
+
+  # ---------------------------------------------------------------------------
+  # lint — the things a formatter cannot fix
+  # ---------------------------------------------------------------------------
+  lint:
+    needs: format
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
 
       - run: uv sync --all-packages
 
+      # ruff check WITHOUT --fix. The format job has already applied everything
+      # fixable, so anything surviving to here needs a human — an unused
+      # argument, a mutable default, a bare except.
+      - run: uv run ruff check .
+      - run: uv run mypy
+
+  # ---------------------------------------------------------------------------
+  # test
+  # ---------------------------------------------------------------------------
+  test:
+    needs: format
+    runs-on: ubuntu-latest
+
+    # Integration tests skip without API_DATABASE_URL rather than failing, so
+    # this currently runs the unit suite only. Adding a postgres service here
+    # would exercise the SQL and the grants, which is where the interesting
+    # bugs live — see conftest.py.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      - run: uv sync --all-packages
+
+      - run: uv run pytest -q
+
+  # ---------------------------------------------------------------------------
+  # docs
+  # ---------------------------------------------------------------------------
+  docs:
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      - run: uv sync --all-packages
+
+      # Regenerated rather than trusted from the repo. The format job commits
+      # them, but a manual edit between commits would otherwise ship.
       - name: Generate docs sources
         run: |
           uv run python scripts/export_openapi.py
@@ -70,17 +177,13 @@ jobs:
           PUBLIC_PREMIERLYTICS_API_KEY: ${{ secrets.PUBLIC_PREMIERLYTICS_API_KEY }}
         run: npm run build
 
-      - name: Deploy documentation
-        if: github.ref == 'refs/heads/main'
-        uses: burnett01/rsync-deployments@7.0.2
-        with:
-          switches: -avzr --delete
-          path: docs/dist/
-          remote_path: /srv/docs/
-          remote_host: ${{ secrets.DOCS_HOST }}
-          remote_user: ${{ secrets.DOCS_USER }}
-          remote_key: ${{ secrets.DOCS_SSH_KEY }}
-        
+      # One deploy, not two. The previous version ran a marketplace action and
+      # then a hand-rolled rsync to the same path, both with --delete — so the
+      # site was torn down and rebuilt twice per deploy, doubling the window in
+      # which a visitor could hit a missing asset.
+      #
+      # The hand-rolled one is kept: it is transparent, and it is one fewer
+      # third-party action holding an SSH key.
       - name: Configure SSH
         if: github.ref == 'refs/heads/main'
         run: |
@@ -89,9 +192,13 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -H "${{ secrets.DOCS_HOST }}" >> ~/.ssh/known_hosts
 
+      # --delay-updates stages every file and swaps them at the end, so the
+      # served directory is never half-old and half-new. Without it a visitor
+      # mid-deploy can request an asset that has been deleted but not yet
+      # replaced.
       - name: Deploy documentation
         if: github.ref == 'refs/heads/main'
         run: |
-          rsync -az --delete \
+          rsync -az --delete --delay-updates \
             docs/dist/ \
             ${{ secrets.DOCS_USER }}@${{ secrets.DOCS_HOST }}:/srv/docs/
