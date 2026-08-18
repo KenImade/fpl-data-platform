@@ -17,11 +17,16 @@ import logging
 import os
 from collections.abc import Iterator
 from dataclasses import dataclass
+from typing import Any
 
 import polars as pl
 
 log = logging.getLogger(__name__)
 
+# dbt's +schema config APPENDS to the target schema, so the built table is
+# <target>_features.feat_training_set rather than features.feat_training_set.
+# Configurable because that prefix differs between dev and production, and a
+# hardcoded one fails at deploy rather than at import.
 FEATURES_SCHEMA = os.environ.get("FEATURES_SCHEMA", "analytics_features")
 TRAINING_SET = f"{FEATURES_SCHEMA}.feat_training_set"
 
@@ -50,12 +55,6 @@ IDENTITY = (
     "kickoff_utc",
     "team_code",
     "opponent_code",
-    # Raw timestamps. The model wants elapsed time, not an instant — an
-    # absolute datetime would let trees split on "before March", which is a
-    # fact about the calendar rather than about football.
-    "club_last_fixture_at",
-    "last_appearance_at",
-    "last_fixture_at",
     "built_at",
 )
 
@@ -81,6 +80,27 @@ LABELS = (
 )
 
 CATEGORICAL = ("position",)
+
+
+def as_int(value: Any) -> int:
+    """Narrow a polars aggregate to int.
+
+    polars scalars type as a wide union — mypy cannot know that .min() on an
+    integer column returns an int rather than a date or a Decimal. Asserting
+    it here rather than casting at each call site keeps the claim in one
+    place, and raises on None rather than producing a confusing TypeError
+    three frames later.
+    """
+    if value is None:
+        raise ValueError("expected an integer, got None")
+    return int(value)
+
+
+def as_float(value: Any) -> float:
+    """Narrow a polars aggregate to float. See as_int."""
+    if value is None:
+        raise ValueError("expected a float, got None")
+    return float(value)
 
 
 @dataclass(frozen=True)
@@ -215,16 +235,14 @@ def walk_forward_splits(
 def prepare(df: pl.DataFrame, features: list[str]) -> pl.DataFrame:
     """Cast for LightGBM.
 
-    Postgres `numeric` arrives as polars Decimal, which becomes a pandas object
-    column and which LightGBM rejects. Every rate, ratio and Elo figure in the
-    matrix is numeric, so this is most of the feature set — cast to Float64.
-    Precision loss is irrelevant here: these are estimates to eight decimal
-    places of quantities known to about one.
+    Categoricals become polars Categorical, which LightGBM handles natively —
+    one-hot encoding position would lose the ordinal structure of nothing in
+    particular but would also triple the column count for no gain.
 
     Booleans become integers. Nulls are left alone: LightGBM splits on
     missingness directly, and imputing would destroy the distinction the
-    feature layer works to preserve — a null rolling rate means no prior
-    appearances, which is not a rate of zero.
+    feature layer works hard to preserve — a null rolling rate means no prior
+    appearances, which is not the same as a rate of zero.
     """
     exprs = []
     for col in features:
@@ -233,8 +251,6 @@ def prepare(df: pl.DataFrame, features: list[str]) -> pl.DataFrame:
             exprs.append(pl.col(col).cast(pl.Categorical))
         elif dtype == pl.Boolean:
             exprs.append(pl.col(col).cast(pl.Int8))
-        elif dtype == pl.Decimal:
-            exprs.append(pl.col(col).cast(pl.Float64))
         else:
             exprs.append(pl.col(col))
     return df.with_columns(exprs)

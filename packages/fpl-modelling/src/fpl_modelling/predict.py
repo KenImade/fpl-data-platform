@@ -23,7 +23,7 @@ from datetime import UTC, datetime
 
 import polars as pl
 
-from fpl_modelling.data import FEATURES_SCHEMA, _dsn
+from fpl_modelling.data import FEATURES_SCHEMA, _dsn, as_float
 from fpl_modelling.train import load
 
 log = logging.getLogger(__name__)
@@ -131,8 +131,8 @@ def predict(df: pl.DataFrame, model_version: str) -> pl.DataFrame:
         "scored %d rows with %s: mean p_60=%.3f, mean e_minutes=%.1f",
         len(out),
         manifest.model_version,
-        float(out["p_minutes_60"].mean()),
-        float(out["e_minutes"].mean()),
+        as_float(out["p_minutes_60"].mean()),
+        as_float(out["e_minutes"].mean()),
     )
     return out.select(OUTPUT_COLUMNS)
 

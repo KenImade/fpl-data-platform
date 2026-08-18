@@ -53,7 +53,7 @@ PREDICTIONS_KEY = AssetKey(["player_gameweek"])
 # The dbt model the prediction frame comes from. Depending on this rather than
 # on the whole dbt run means a features rebuild triggers a rescore and a
 # marts-only rebuild does not.
-TRAINING_SET_KEY = AssetKey(["features", "feat_training_set"])
+TRAINING_SET_KEY = AssetKey(["feat_training_set"])
 
 
 @asset(
@@ -148,6 +148,7 @@ def minutes_predictions(
     with a different version inserts alongside rather than replacing, which is
     what makes challenger comparison possible.
     """
+    from fpl_modelling.data import as_float
     from fpl_modelling.predict import load_prediction_frame, predict, write
 
     dsn = postgres.connection_string()
@@ -190,7 +191,7 @@ def minutes_predictions(
             "season": MetadataValue.text(season),
             "rows_written": n,
             "gameweeks": MetadataValue.text(f"{min(gameweeks)}-{max(gameweeks)}"),
-            "mean_p_60": float(predictions["p_minutes_60"].mean()),
+            "mean_p_60": as_float(predictions["p_minutes_60"].mean()),
             "cold_start_rows": int(predictions["is_cold_start"].sum()),
         }
     )
@@ -208,7 +209,7 @@ def _active_version(dsn: str) -> str | None:
             (MODEL_NAME,),
         )
         row = cur.fetchone()
-    return row[0] if row else None
+    return str(row[0]) if row else None
 
 
 def _current_season(dsn: str) -> str:
@@ -224,4 +225,4 @@ def _current_season(dsn: str) -> str:
         row = cur.fetchone()
     if row is None:
         raise ValueError("dim_gameweek is empty - has the warehouse been built?")
-    return row[0]
+    return str(row[0])

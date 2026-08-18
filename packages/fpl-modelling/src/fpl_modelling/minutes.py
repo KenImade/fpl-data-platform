@@ -28,8 +28,9 @@ cumulative.
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
+from typing import Any
 
 import lightgbm as lgb
 import numpy as np
@@ -45,7 +46,7 @@ log = logging.getLogger(__name__)
 # non-appearance. Deep trees on that will memorise players rather than learn
 # selection, and the walk-forward evaluation will not always catch it because
 # the same players recur in every fold.
-PARAMS: dict = {
+PARAMS: dict[str, Any] = {
     "objective": "binary",
     "metric": "binary_logloss",
     "learning_rate": 0.05,
@@ -92,9 +93,17 @@ class MinutesModel:
             if col in x.columns:
                 x[col] = x[col].astype("category")
 
+        # Booster.predict is typed as possibly returning a list. asarray is
+        # a no-op for the ndarray case and correct for the other.
         return (
-            self.played.predict(x, num_iteration=self.played.best_iteration),
-            self.played_60.predict(x, num_iteration=self.played_60.best_iteration),
+            np.asarray(
+                self.played.predict(x, num_iteration=self.played.best_iteration),
+                dtype=float,
+            ),
+            np.asarray(
+                self.played_60.predict(x, num_iteration=self.played_60.best_iteration),
+                dtype=float,
+            ),
         )
 
     def predict_bands(self, df: pl.DataFrame) -> np.ndarray:
@@ -133,7 +142,8 @@ def _bands_from_cumulative(
     p_60 = np.minimum(p_60, p_play)
     bands = np.column_stack([1.0 - p_play, p_play - p_60, p_60])
     bands = np.clip(bands, 0.0, None)
-    return bands / bands.sum(axis=1, keepdims=True)
+    normalised: np.ndarray = bands / bands.sum(axis=1, keepdims=True)
+    return normalised
 
 
 def _fit_binary(
@@ -151,7 +161,8 @@ def _fit_binary(
 
     dtrain = lgb.Dataset(x, label=target, free_raw_data=False)
 
-    valid_sets, callbacks = [], []
+    valid_sets: list[lgb.Dataset] = []
+    callbacks: list[Callable[..., Any]] = []
     if valid is not None and valid_target is not None and len(valid) > 0:
         xv = prepare(valid, features).select(features).to_pandas()
         for col in CATEGORICAL:

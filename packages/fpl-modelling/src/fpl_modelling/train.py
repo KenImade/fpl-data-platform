@@ -34,12 +34,15 @@ import tempfile
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import lightgbm as lgb
 import polars as pl
 
 from fpl_modelling import minutes as minutes_model
 from fpl_modelling.data import (
+    as_float,
+    as_int,
     feature_columns,
     load_training_set,
     walk_forward_splits,
@@ -70,7 +73,7 @@ class TrainingManifest:
     train_gameweek_max: int
     features: list[str]
     feature_count: int
-    params: dict
+    params: dict[str, Any]
     best_iterations: dict[str, int]
     metrics: dict[str, float]
     code_version: str
@@ -108,8 +111,8 @@ def _data_version(df: pl.DataFrame, features: list[str]) -> str:
         {
             "rows": len(df),
             "seasons": sorted(df["season"].unique().to_list()),
-            "gw_min": int(df["gameweek"].min()),
-            "gw_max": int(df["gameweek"].max()),
+            "gw_min": as_int(df["gameweek"].min()),
+            "gw_max": as_int(df["gameweek"].max()),
             "features": sorted(features),
         },
         sort_keys=True,
@@ -126,7 +129,7 @@ def make_version(code: str, data: str) -> str:
     return f"minutes-{code}-{data}"
 
 
-def _store():
+def _store() -> Any:
     """Object storage client.
 
     S3-compatible, so MinIO locally and whatever the deployment uses in
@@ -154,6 +157,11 @@ def save(model: minutes_model.MinutesModel, manifest: TrainingManifest) -> str:
     only meaningful together, and a partial read that returns a model without
     its feature list is worse than a failed read.
     """
+    if model.played is None or model.played_60 is None:
+        # Saving an unfitted model would write a well-formed artifact that
+        # fails only when something tries to predict with it.
+        raise RuntimeError("cannot save an unfitted model")
+
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
         model.played.save_model(str(tmp_path / "played.txt"))
@@ -252,7 +260,7 @@ def train(
             valid = results.filter(pl.col(col).is_not_nan() & pl.col(col).is_not_null())
             if len(valid) == 0:
                 continue
-            metrics[col] = float((valid[col] * valid["n"]).sum() / valid["n"].sum())
+            metrics[col] = as_float((valid[col] * valid["n"]).sum()) / as_float(valid["n"].sum())
             metrics[f"{col}_folds"] = float(len(valid))
         metrics["folds_total"] = float(len(results))
         metrics["eval_rows"] = float(total)
@@ -281,8 +289,8 @@ def train(
         trained_at=datetime.now(UTC).isoformat(),
         seasons=sorted(df["season"].unique().to_list()),
         train_rows=len(df),
-        train_gameweek_min=int(df["gameweek"].min()),
-        train_gameweek_max=int(df["gameweek"].max()),
+        train_gameweek_min=as_int(df["gameweek"].min()),
+        train_gameweek_max=as_int(df["gameweek"].max()),
         features=features,
         feature_count=len(features),
         params=dict(minutes_model.PARAMS),

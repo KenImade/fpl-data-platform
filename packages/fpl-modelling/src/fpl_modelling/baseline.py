@@ -19,9 +19,12 @@ Anything the real model adds has to show up as an improvement over these.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 
 import numpy as np
 import polars as pl
+
+from fpl_modelling.data import Split
 
 log = logging.getLogger(__name__)
 
@@ -127,7 +130,7 @@ def evaluate_bands(
     return metrics
 
 
-def run_baselines(df: pl.DataFrame, splits) -> pl.DataFrame:
+def run_baselines(df: pl.DataFrame, splits: Iterable[Split]) -> pl.DataFrame:
     """Score both baselines across every walk-forward fold.
 
     Returns one row per fold per baseline. Aggregate with care: a simple mean
