@@ -219,7 +219,7 @@ def _current_season(dsn: str) -> str:
     """
     with psycopg.connect(dsn) as conn, conn.cursor() as cur:
         cur.execute(
-            "select season from analytics_marts.dim_gameweek " "order by deadline_utc desc limit 1"
+            "select season from analytics_marts.dim_gameweek order by deadline_utc desc limit 1"
         )
         row = cur.fetchone()
     if row is None:

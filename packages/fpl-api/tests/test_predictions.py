@@ -223,7 +223,7 @@ async def test_cold_start_filter_removes_them(client, pk) -> None:
     """Cold-start predictions rest on a positional prior rather than the
     player's own history, and an optimiser is usually better off without."""
     r = await client.get(
-        f"/v1/predictions/gameweek/1?season={SEASON}" "&exclude_cold_start=true&limit=200",
+        f"/v1/predictions/gameweek/1?season={SEASON}&exclude_cold_start=true&limit=200",
         headers=auth(pk),
     )
     items = r.json()["items"]

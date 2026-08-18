@@ -88,7 +88,7 @@ class PlayerGameweekPrediction(BaseModel):
 
     fixtures_in_gw: int = Field(
         description=(
-            "League fixtures this player's club plays in this gameweek. 2 " "marks a double."
+            "League fixtures this player's club plays in this gameweek. 2 marks a double."
         ),
         examples=[1],
     )
@@ -100,7 +100,7 @@ class PlayerGameweekPrediction(BaseModel):
     opponents: str | None = Field(
         default=None,
         description=(
-            "Opponents with home or away, in kickoff order. A double gameweek " "lists both."
+            "Opponents with home or away, in kickoff order. A double gameweek lists both."
         ),
         examples=["Liverpool (H), Everton (A)"],
     )
@@ -157,7 +157,7 @@ class PlayerGameweekPrediction(BaseModel):
     p_clean_sheet: float | None = Field(
         default=None,
         description=(
-            "Probability of a clean sheet in at least one fixture. " "**Null: no model yet.**"
+            "Probability of a clean sheet in at least one fixture. **Null: no model yet.**"
         ),
     )
 
