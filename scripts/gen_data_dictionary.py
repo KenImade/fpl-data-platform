@@ -57,8 +57,7 @@ MODELS: list[tuple[type[BaseModel], str, str]] = [
     (
         PlayerGameweekPrediction,
         "Player gameweek prediction",
-        "`GET /v1/predictions/gameweek/{gameweek}`, "
-        "`GET /v1/predictions/player/{player_id}`",
+        "`GET /v1/predictions/gameweek/{gameweek}`, `GET /v1/predictions/player/{player_id}`",
     ),
     (
         PlayerFixturePrediction,

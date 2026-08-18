@@ -55,8 +55,26 @@ Null is rarely "missing". Usually it carries information:
 | `days_since_last_match` | Kickoff time is unknown, or this is the first match |
 | `chance_of_playing_next` | No availability flag; player is presumed available |
 | `result`, `goals_for` | Fixture has not been played |
+| `e_goals`, `e_points` and other components | No model has been built for that component yet |
 
 The field description defines ambiguous cases.
+
+### Predictions are estimates
+
+The prediction responses are model output rather than a record of what
+happened, and some of their numbers rest on far more evidence than others.
+
+- **Most components are null.** Only the minutes model exists so far. Fields
+  awaiting a model are present and empty rather than absent, so a response
+  shape built today keeps working when they arrive.
+- **`is_cold_start` marks a prediction made without history** — a new signing,
+  a promoted club's squad player, or the opening gameweek. It is a positional
+  prior rather than an estimate from that player's own record.
+- **`snapshot_id` and `model_version` identify exactly what produced a
+  number.** Quote both in a bug report and the prediction can be reproduced.
+- **Double gameweeks aggregate differently by field.** Expectations sum;
+  probabilities combine as `1 - prod(1 - p)`, which slightly overstates
+  because it assumes the fixtures are independent.
 
 ### Provenance
 
@@ -65,6 +83,7 @@ Values come from:
 - **Our captures** — price, ownership, injury news, availability.
 - **Core Insights** — match statistics, xG, defensive actions, Elo.
 - **Derived** — calculated values such as rest days and season totals.
+- **Modelled** — predictions, which carry the version that produced them.
 
 Season totals inherit the known [~2% coverage gap](/data/quality/), so they
 will not always match FPL's official totals exactly.
@@ -167,6 +186,86 @@ will not always match FPL's official totals exactly.
 - [`away_score`](#fixture-away_score)
 - [`home_elo`](#fixture-home_elo)
 - [`away_elo`](#fixture-away_elo)
+
+### Player gameweek prediction
+
+- [`season`](#playergameweekprediction-season)
+- [`gameweek`](#playergameweekprediction-gameweek)
+- [`player_id`](#playergameweekprediction-player_id)
+- [`player_code`](#playergameweekprediction-player_code)
+- [`web_name`](#playergameweekprediction-web_name)
+- [`full_name`](#playergameweekprediction-full_name)
+- [`position`](#playergameweekprediction-position)
+- [`team_code`](#playergameweekprediction-team_code)
+- [`team_name`](#playergameweekprediction-team_name)
+- [`team_short`](#playergameweekprediction-team_short)
+- [`price`](#playergameweekprediction-price)
+- [`fixtures_in_gw`](#playergameweekprediction-fixtures_in_gw)
+- [`is_double_gw`](#playergameweekprediction-is_double_gw)
+- [`opponents`](#playergameweekprediction-opponents)
+- [`avg_elo_diff`](#playergameweekprediction-avg_elo_diff)
+- [`first_kickoff`](#playergameweekprediction-first_kickoff)
+- [`last_kickoff`](#playergameweekprediction-last_kickoff)
+- [`p_minutes_60`](#playergameweekprediction-p_minutes_60)
+- [`e_minutes`](#playergameweekprediction-e_minutes)
+- [`e_goals`](#playergameweekprediction-e_goals)
+- [`e_assists`](#playergameweekprediction-e_assists)
+- [`p_clean_sheet`](#playergameweekprediction-p_clean_sheet)
+- [`e_saves`](#playergameweekprediction-e_saves)
+- [`e_goals_conceded`](#playergameweekprediction-e_goals_conceded)
+- [`p_defcon`](#playergameweekprediction-p_defcon)
+- [`e_bonus`](#playergameweekprediction-e_bonus)
+- [`e_cards`](#playergameweekprediction-e_cards)
+- [`e_points`](#playergameweekprediction-e_points)
+- [`prior_appearances`](#playergameweekprediction-prior_appearances)
+- [`is_cold_start`](#playergameweekprediction-is_cold_start)
+- [`snapshot_id`](#playergameweekprediction-snapshot_id)
+- [`model_version`](#playergameweekprediction-model_version)
+- [`predicted_at`](#playergameweekprediction-predicted_at)
+
+### Player fixture prediction
+
+- [`season`](#playerfixtureprediction-season)
+- [`gameweek`](#playerfixtureprediction-gameweek)
+- [`player_id`](#playerfixtureprediction-player_id)
+- [`player_code`](#playerfixtureprediction-player_code)
+- [`match_id`](#playerfixtureprediction-match_id)
+- [`web_name`](#playerfixtureprediction-web_name)
+- [`position`](#playerfixtureprediction-position)
+- [`team_code`](#playerfixtureprediction-team_code)
+- [`team_name`](#playerfixtureprediction-team_name)
+- [`price`](#playerfixtureprediction-price)
+- [`opponent_code`](#playerfixtureprediction-opponent_code)
+- [`opponent_name`](#playerfixtureprediction-opponent_name)
+- [`is_home`](#playerfixtureprediction-is_home)
+- [`kickoff_utc`](#playerfixtureprediction-kickoff_utc)
+- [`elo_diff`](#playerfixtureprediction-elo_diff)
+- [`p_minutes_0`](#playerfixtureprediction-p_minutes_0)
+- [`p_minutes_1_59`](#playerfixtureprediction-p_minutes_1_59)
+- [`p_minutes_60`](#playerfixtureprediction-p_minutes_60)
+- [`e_minutes`](#playerfixtureprediction-e_minutes)
+- [`e_goals`](#playerfixtureprediction-e_goals)
+- [`e_assists`](#playerfixtureprediction-e_assists)
+- [`p_clean_sheet`](#playerfixtureprediction-p_clean_sheet)
+- [`e_saves`](#playerfixtureprediction-e_saves)
+- [`e_goals_conceded`](#playerfixtureprediction-e_goals_conceded)
+- [`p_defcon`](#playerfixtureprediction-p_defcon)
+- [`e_bonus`](#playerfixtureprediction-e_bonus)
+- [`e_cards`](#playerfixtureprediction-e_cards)
+- [`e_points`](#playerfixtureprediction-e_points)
+- [`prior_appearances`](#playerfixtureprediction-prior_appearances)
+- [`is_cold_start`](#playerfixtureprediction-is_cold_start)
+- [`snapshot_id`](#playerfixtureprediction-snapshot_id)
+- [`model_version`](#playerfixtureprediction-model_version)
+- [`predicted_at`](#playerfixtureprediction-predicted_at)
+
+### Prediction page
+
+- [`items`](#predictionpage-items)
+- [`total`](#predictionpage-total)
+- [`limit`](#predictionpage-limit)
+- [`offset`](#predictionpage-offset)
+- [`model_version`](#predictionpage-model_version)
 
 ## Team
 
@@ -350,4 +449,130 @@ rather than per fixture.
 | <a id="fixture-away_score"></a>`away_score` | integer | Yes | Goals scored by the away side. Null if the fixture has not been played. |
 | <a id="fixture-home_elo"></a>`home_elo` | number | Yes | ClubElo rating for the home side **at kickoff**, not an end-of-season figure. Being point-in-time, it carries no hindsight and is safe as a model prior — including for promoted clubs, whose rating derives from their Championship form and so exists before they have played a top-flight match. Null for fixtures not yet played, and for non-league opposition. |
 | <a id="fixture-away_elo"></a>`away_elo` | number | Yes | ClubElo rating for the away side at kickoff. See `home_elo`. |
+
+
+## Player gameweek prediction
+
+Returned by `GET /v1/predictions/gameweek/{gameweek}`, `GET /v1/predictions/player/{player_id}`.
+
+One player, one gameweek.
+
+Aggregated across fixtures, so a double gameweek is a single row. That is
+what most callers want — asking how many points someone scores in GW26 has
+one answer — but it means the aggregation rules matter:
+
+Expectations SUM across fixtures. Two matches is two chances to score, and
+the arithmetic holds whether or not the fixtures are related.
+
+Probabilities DO NOT sum. `p_minutes_60` is the probability of clearing
+sixty minutes in AT LEAST ONE fixture, computed as 1 - prod(1 - p) under
+independence. Independence is not quite right — a player injured in the
+first fixture misses the second — so double-gameweek probabilities are
+slightly optimistic. Use the fixture-grain endpoint for the unaggregated
+figures.
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| <a id="playergameweekprediction-season"></a>`season` | string | No | _No description. Add `Field(description=...)` to `season`._ |
+| <a id="playergameweekprediction-gameweek"></a>`gameweek` | integer | No | The gameweek this prediction covers. |
+| <a id="playergameweekprediction-player_id"></a>`player_id` | integer | No | Season-scoped identifier, reassigned every August. Fine within a season; use `player_code` for anything crossing one. |
+| <a id="playergameweekprediction-player_code"></a>`player_code` | integer | Yes | Permanent identifier. The correct key for historical joins. |
+| <a id="playergameweekprediction-web_name"></a>`web_name` | string | No | _No description. Add `Field(description=...)` to `web_name`._ |
+| <a id="playergameweekprediction-full_name"></a>`full_name` | string | Yes | _No description. Add `Field(description=...)` to `full_name`._ |
+| <a id="playergameweekprediction-position"></a>`position` | string | Yes | `GKP`, `DEF`, `MID` or `FWD`. Determines scoring, so it is what makes the component predictions interpretable. |
+| <a id="playergameweekprediction-team_code"></a>`team_code` | integer | Yes | _No description. Add `Field(description=...)` to `team_code`._ |
+| <a id="playergameweekprediction-team_name"></a>`team_name` | string | Yes | _No description. Add `Field(description=...)` to `team_name`._ |
+| <a id="playergameweekprediction-team_short"></a>`team_short` | string | Yes | _No description. Add `Field(description=...)` to `team_short`._ |
+| <a id="playergameweekprediction-price"></a>`price` | number | Yes | Current price in millions, from the most recent capture. |
+| <a id="playergameweekprediction-fixtures_in_gw"></a>`fixtures_in_gw` | integer | No | League fixtures this player's club plays in this gameweek. 2 marks a double. |
+| <a id="playergameweekprediction-is_double_gw"></a>`is_double_gw` | boolean | No | Shorthand for `fixtures_in_gw > 1`. |
+| <a id="playergameweekprediction-opponents"></a>`opponents` | string | Yes | Opponents with home or away, in kickoff order. A double gameweek lists both. |
+| <a id="playergameweekprediction-avg_elo_diff"></a>`avg_elo_diff` | number | Yes | This club's Elo minus the opponent's, averaged across fixtures. Positive means the stronger side. A rough fixture-difficulty figure that does not depend on FPL's own ratings. |
+| <a id="playergameweekprediction-first_kickoff"></a>`first_kickoff` | datetime | Yes | _No description. Add `Field(description=...)` to `first_kickoff`._ |
+| <a id="playergameweekprediction-last_kickoff"></a>`last_kickoff` | datetime | Yes | _No description. Add `Field(description=...)` to `last_kickoff`._ |
+| <a id="playergameweekprediction-p_minutes_60"></a>`p_minutes_60` | number | No | Probability of playing sixty minutes or more, in at least one fixture.
+
+The most load-bearing number here: the second appearance point and clean-sheet eligibility both hang off this threshold, so most of the variance in a player's score is decided by it rather than by how well they play. |
+| <a id="playergameweekprediction-e_minutes"></a>`e_minutes` | number | No | Expected minutes, summed across fixtures — so a double gameweek can exceed 90. Derived from band midpoints rather than a regression, so treat it as a scaling factor for per-90 rates rather than a precise forecast. |
+| <a id="playergameweekprediction-e_goals"></a>`e_goals` | number | Yes | Expected goals. **Null: no model yet.** A null here means the component has not been built, not that the player is expected to score zero. |
+| <a id="playergameweekprediction-e_assists"></a>`e_assists` | number | Yes | **Null: no model yet.** |
+| <a id="playergameweekprediction-p_clean_sheet"></a>`p_clean_sheet` | number | Yes | Probability of a clean sheet in at least one fixture. **Null: no model yet.** |
+| <a id="playergameweekprediction-e_saves"></a>`e_saves` | number | Yes | **Null: no model yet.** |
+| <a id="playergameweekprediction-e_goals_conceded"></a>`e_goals_conceded` | number | Yes | **Null: no model yet.** |
+| <a id="playergameweekprediction-p_defcon"></a>`p_defcon` | number | Yes | Probability of meeting the defensive contribution threshold — 10 CBIT for defenders, 12 including recoveries for midfielders and forwards. **Null: no model yet.** |
+| <a id="playergameweekprediction-e_bonus"></a>`e_bonus` | number | Yes | **Null: no model yet.** |
+| <a id="playergameweekprediction-e_cards"></a>`e_cards` | number | Yes | **Null: no model yet.** |
+| <a id="playergameweekprediction-e_points"></a>`e_points` | number | Yes | Expected FPL points, recombined from the components through the scoring rules.
+
+**Null until enough components exist to make it meaningful.** Only the minutes model is built, and appearance points alone would be a misleading total. |
+| <a id="playergameweekprediction-prior_appearances"></a>`prior_appearances` | integer | Yes | League appearances before this gameweek's deadline. The single best guide to how much evidence sits behind the prediction: appearance rates rise steeply from roughly 5% at zero prior appearances to over 70% at ten. |
+| <a id="playergameweekprediction-is_cold_start"></a>`is_cold_start` | boolean | No | No prior league appearances this season — a new signing, a promoted club's squad player, or the opening gameweek.
+
+The prediction is a positional prior rather than an estimate from this player's own history. Worth surfacing differently in a UI, and worth discounting in an optimiser. |
+| <a id="playergameweekprediction-snapshot_id"></a>`snapshot_id` | string | No | The point-in-time feature state this prediction was made from. Every input predates the gameweek deadline by construction, so the number reflects only what a manager could have known. |
+| <a id="playergameweekprediction-model_version"></a>`model_version` | string | No | Identifies the code and the training data together. Quote it in a bug report — with `snapshot_id` it is enough to reproduce the prediction exactly. |
+| <a id="playergameweekprediction-predicted_at"></a>`predicted_at` | datetime | No | When this was scored. Predictions are refreshed as the deadline approaches and team news moves, so a stale timestamp means stale availability information. |
+
+
+## Player fixture prediction
+
+Returned by `GET /v1/predictions/fixtures`.
+
+One player, one fixture.
+
+The unaggregated form. Use it when a double gameweek's fixtures need
+treating separately — comparing a home tie against a strong side with an
+away tie against a weak one, say, where the gameweek total hides the
+difference.
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| <a id="playerfixtureprediction-season"></a>`season` | string | No | _No description. Add `Field(description=...)` to `season`._ |
+| <a id="playerfixtureprediction-gameweek"></a>`gameweek` | integer | No | _No description. Add `Field(description=...)` to `gameweek`._ |
+| <a id="playerfixtureprediction-player_id"></a>`player_id` | integer | No | _No description. Add `Field(description=...)` to `player_id`._ |
+| <a id="playerfixtureprediction-player_code"></a>`player_code` | integer | Yes | _No description. Add `Field(description=...)` to `player_code`._ |
+| <a id="playerfixtureprediction-match_id"></a>`match_id` | string | No | Identifies the fixture. |
+| <a id="playerfixtureprediction-web_name"></a>`web_name` | string | No | _No description. Add `Field(description=...)` to `web_name`._ |
+| <a id="playerfixtureprediction-position"></a>`position` | string | Yes | _No description. Add `Field(description=...)` to `position`._ |
+| <a id="playerfixtureprediction-team_code"></a>`team_code` | integer | Yes | _No description. Add `Field(description=...)` to `team_code`._ |
+| <a id="playerfixtureprediction-team_name"></a>`team_name` | string | Yes | _No description. Add `Field(description=...)` to `team_name`._ |
+| <a id="playerfixtureprediction-price"></a>`price` | number | Yes | _No description. Add `Field(description=...)` to `price`._ |
+| <a id="playerfixtureprediction-opponent_code"></a>`opponent_code` | integer | Yes | _No description. Add `Field(description=...)` to `opponent_code`._ |
+| <a id="playerfixtureprediction-opponent_name"></a>`opponent_name` | string | Yes | _No description. Add `Field(description=...)` to `opponent_name`._ |
+| <a id="playerfixtureprediction-is_home"></a>`is_home` | boolean | Yes | _No description. Add `Field(description=...)` to `is_home`._ |
+| <a id="playerfixtureprediction-kickoff_utc"></a>`kickoff_utc` | datetime | Yes | _No description. Add `Field(description=...)` to `kickoff_utc`._ |
+| <a id="playerfixtureprediction-elo_diff"></a>`elo_diff` | number | Yes | This club's Elo at kickoff minus the opponent's. |
+| <a id="playerfixtureprediction-p_minutes_0"></a>`p_minutes_0` | number | No | Probability of not appearing. |
+| <a id="playerfixtureprediction-p_minutes_1_59"></a>`p_minutes_1_59` | number | No | Probability of appearing but not reaching sixty minutes. |
+| <a id="playerfixtureprediction-p_minutes_60"></a>`p_minutes_60` | number | No | Probability of sixty minutes or more, in this fixture. |
+| <a id="playerfixtureprediction-e_minutes"></a>`e_minutes` | number | No | _No description. Add `Field(description=...)` to `e_minutes`._ |
+| <a id="playerfixtureprediction-e_goals"></a>`e_goals` | number | Yes | **Null: no model yet.** |
+| <a id="playerfixtureprediction-e_assists"></a>`e_assists` | number | Yes | **Null: no model yet.** |
+| <a id="playerfixtureprediction-p_clean_sheet"></a>`p_clean_sheet` | number | Yes | **Null: no model yet.** |
+| <a id="playerfixtureprediction-e_saves"></a>`e_saves` | number | Yes | **Null: no model yet.** |
+| <a id="playerfixtureprediction-e_goals_conceded"></a>`e_goals_conceded` | number | Yes | **Null: no model yet.** |
+| <a id="playerfixtureprediction-p_defcon"></a>`p_defcon` | number | Yes | **Null: no model yet.** |
+| <a id="playerfixtureprediction-e_bonus"></a>`e_bonus` | number | Yes | **Null: no model yet.** |
+| <a id="playerfixtureprediction-e_cards"></a>`e_cards` | number | Yes | **Null: no model yet.** |
+| <a id="playerfixtureprediction-e_points"></a>`e_points` | number | Yes | **Null: no model yet.** |
+| <a id="playerfixtureprediction-prior_appearances"></a>`prior_appearances` | integer | Yes | _No description. Add `Field(description=...)` to `prior_appearances`._ |
+| <a id="playerfixtureprediction-is_cold_start"></a>`is_cold_start` | boolean | No | _No description. Add `Field(description=...)` to `is_cold_start`._ |
+| <a id="playerfixtureprediction-snapshot_id"></a>`snapshot_id` | string | No | _No description. Add `Field(description=...)` to `snapshot_id`._ |
+| <a id="playerfixtureprediction-model_version"></a>`model_version` | string | No | _No description. Add `Field(description=...)` to `model_version`._ |
+| <a id="playerfixtureprediction-predicted_at"></a>`predicted_at` | datetime | No | _No description. Add `Field(description=...)` to `predicted_at`._ |
+
+
+## Prediction page
+
+Returned by `GET /v1/predictions/gameweek/{gameweek}` — the pagination envelope.
+
+A page of predictions.
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| <a id="predictionpage-items"></a>`items` | array of PlayerGameweekPrediction | No | _No description. Add `Field(description=...)` to `items`._ |
+| <a id="predictionpage-total"></a>`total` | integer | No | Total matching the filters, ignoring pagination. |
+| <a id="predictionpage-limit"></a>`limit` | integer | No | Page size as requested. Maximum 200. |
+| <a id="predictionpage-offset"></a>`offset` | integer | No | Rows skipped. |
+| <a id="predictionpage-model_version"></a>`model_version` | string | Yes | The version serving this page. One per response — a page never mixes versions, so a consumer can cache against it. |
 
