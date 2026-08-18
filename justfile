@@ -12,11 +12,7 @@ bootstrap: up _bucket _dagster_db
 
 docs-refresh:
     uv run python scripts/gen_data_dictionary.py
-    uv run python -c "
-    import json
-    from fpl_api.main import app
-    open('docs/src/openapi.json','w').write(json.dumps(app.openapi(), indent=2))
-    "
+    uv run python scripts/export_openapi.py
 
 docs:
     cd docs && npm run dev
