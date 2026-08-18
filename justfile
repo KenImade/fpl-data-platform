@@ -69,3 +69,9 @@ seed:
 
 _api_role:
     docker compose exec -T postgres psql -U fpl -d fpl -f /dev/stdin < deploy/api_role.sql || true
+
+create-key name type email:
+    docker compose -f compose.prod.yml exec \
+      -e API_DATABASE_URL="$DATABASE_URL" \
+      api python -m fpl_api.cli create \
+        --name "{{name}}" --type {{type}} --email {{email}}
