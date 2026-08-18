@@ -9,6 +9,12 @@ describe a field that does not exist or miss one that does. Prose lives in
 Field(description=...) beside the definition, where it gets updated when the
 field does.
 
+MODELS BELOW IS HAND-MAINTAINED, which is the one gap in that guarantee: a new
+response model is not undocumented here, it is invisible, and the count reports
+a clean total either way. The check at the end of main() reconciles the list
+against the schema the app actually publishes, so an omission shows up in the
+CI log rather than nowhere.
+
 Run from the repo root:
     uv run python scripts/gen_data_dictionary.py
 
@@ -27,11 +33,20 @@ from pathlib import Path
 from fpl_api.schemas.fixtures import Fixture
 from fpl_api.schemas.gameweeks import Gameweek
 from fpl_api.schemas.players import Player, PlayerPage
+from fpl_api.schemas.predictions import (
+    PlayerFixturePrediction,
+    PlayerGameweekPrediction,
+    PredictionPage,
+)
 from fpl_api.schemas.teams import Team
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 
 OUT = Path("docs/src/content/docs/data/dictionary.md")
+
+# Schema components that are not response models. FastAPI generates these for
+# request validation, and they have no place in a field reference.
+INTERNAL_SCHEMAS = {"HTTPValidationError", "ValidationError"}
 
 MODELS: list[tuple[type[BaseModel], str, str]] = [
     (Team, "Team", "`GET /v1/teams`, `GET /v1/teams/{team_code}`"),
@@ -39,6 +54,22 @@ MODELS: list[tuple[type[BaseModel], str, str]] = [
     (Player, "Player", "`GET /v1/players`, `GET /v1/players/{player_id}`"),
     (PlayerPage, "Player page", "`GET /v1/players` — the pagination envelope"),
     (Fixture, "Fixture", "`GET /v1/fixtures`, `GET /v1/fixtures/{match_id}`"),
+    (
+        PlayerGameweekPrediction,
+        "Player gameweek prediction",
+        "`GET /v1/predictions/gameweek/{gameweek}`, "
+        "`GET /v1/predictions/player/{player_id}`",
+    ),
+    (
+        PlayerFixturePrediction,
+        "Player fixture prediction",
+        "`GET /v1/predictions/fixtures`",
+    ),
+    (
+        PredictionPage,
+        "Prediction page",
+        "`GET /v1/predictions/gameweek/{gameweek}` — the pagination envelope",
+    ),
 ]
 
 
@@ -99,8 +130,26 @@ Null is rarely "missing". Usually it carries information:
 | `days_since_last_match` | Kickoff time is unknown, or this is the first match |
 | `chance_of_playing_next` | No availability flag; player is presumed available |
 | `result`, `goals_for` | Fixture has not been played |
+| `e_goals`, `e_points` and other components | No model has been built for that component yet |
 
 The field description defines ambiguous cases.
+
+### Predictions are estimates
+
+The prediction responses are model output rather than a record of what
+happened, and some of their numbers rest on far more evidence than others.
+
+- **Most components are null.** Only the minutes model exists so far. Fields
+  awaiting a model are present and empty rather than absent, so a response
+  shape built today keeps working when they arrive.
+- **`is_cold_start` marks a prediction made without history** — a new signing,
+  a promoted club's squad player, or the opening gameweek. It is a positional
+  prior rather than an estimate from that player's own record.
+- **`snapshot_id` and `model_version` identify exactly what produced a
+  number.** Quote both in a bug report and the prediction can be reproduced.
+- **Double gameweeks aggregate differently by field.** Expectations sum;
+  probabilities combine as `1 - prod(1 - p)`, which slightly overstates
+  because it assumes the fixtures are independent.
 
 ### Provenance
 
@@ -109,6 +158,7 @@ Values come from:
 - **Our captures** — price, ownership, injury news, availability.
 - **Core Insights** — match statistics, xG, defensive actions, Elo.
 - **Derived** — calculated values such as rest days and season totals.
+- **Modelled** — predictions, which carry the version that produced them.
 
 Season totals inherit the known [~2% coverage gap](/data/quality/), so they
 will not always match FPL's official totals exactly.
@@ -213,6 +263,21 @@ def _table(model: type[BaseModel]) -> str:
     return "\n".join(rows)
 
 
+def _undocumented_models() -> set[str]:
+    """Response models the app publishes but MODELS does not cover.
+
+    The list above is hand-maintained, so a new schema is invisible here rather
+    than undocumented — the field count comes out clean either way, which is
+    the worst kind of quiet. The OpenAPI schema knows every model the app
+    actually returns, so reconciling against it makes the gap loud.
+    """
+    from fpl_api.main import app
+
+    published = set(app.openapi().get("components", {}).get("schemas", {}))
+    documented = {model.__name__ for model, _, _ in MODELS}
+    return published - documented - INTERNAL_SCHEMAS
+
+
 def main() -> int:
     parts = [PREAMBLE, _field_index()]
 
@@ -241,6 +306,13 @@ def main() -> int:
     if undocumented:
         print(f"\n{undocumented} fields have no description.")
         print("Add Field(description=...) to document them.")
+
+    # Non-fatal. Some published schemas are legitimately internal, so failing
+    # the build here would eventually be worked around rather than fixed.
+    missing = _undocumented_models()
+    if missing:
+        print(f"\nWARNING: response models absent from MODELS: {sorted(missing)}")
+        print("They are published by the API but do not appear in this page.")
 
     return 0
 
