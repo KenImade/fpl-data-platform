@@ -70,8 +70,15 @@ seed:
 _api_role:
     docker compose exec -T postgres psql -U fpl -d fpl -f /dev/stdin < deploy/api_role.sql || true
 
-create-key name type email:
+# Issue an API key. Runs as the warehouse owner rather than the API role —
+# fpl_api is read-only by design and cannot write app.api_key.
+create-key name type="publishable" email="":
     docker compose -f compose.prod.yml exec \
-      -e API_DATABASE_URL="$DATABASE_URL" \
+      -e API_DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@postgres:5432/$POSTGRES_DB" \
       api python -m fpl_api.cli create \
-        --name "{{name}}" --type {{type}} --email {{email}}
+        --name "{{name}}" --type {{type}} {{ if email != "" { "--email " + email } else { "" } }}
+
+list-keys:
+    docker compose -f -f compose.prod.yml exec \
+      -e API_DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@postgres:5432/$POSTGRES_DB" \
+      api python -m fpl_api.cli list
