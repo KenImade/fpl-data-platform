@@ -5,10 +5,12 @@ prediction step that retrains is not reproducible, and it is slow at exactly the
 moment it must not be: the deadline window, where the whole point of the capture
 cadence is that state moves in the final hours.
 
-WHAT IT SCORES. Rows from feat_training_set whose fixture has not yet kicked
-off. The same model that produced the training matrix produces the prediction
-frame, which is what makes train/serve skew structurally unavailable rather than
-merely avoided — there is no second code path computing features a different way.
+WHAT IT SCORES. Rows whose fixture has not yet kicked off, read through the
+same MatrixSpec the training path used. That is what makes train/serve skew
+structurally unavailable rather than merely avoided: the labelled and unlabelled
+predicates are declared side by side in one place, so there is no second code
+path computing features a different way and no way to widen one predicate
+without noticing it no longer mirrors the other.
 
 WHAT IT WRITES. One row per player per fixture, stamped with the model version
 and the snapshot it was made from. Components separately rather than only a
@@ -23,7 +25,7 @@ from datetime import UTC, datetime
 
 import polars as pl
 
-from fpl_modelling.data import FEATURES_SCHEMA, _dsn, as_float
+from fpl_modelling.data import PLAYER_MATRIX, MatrixSpec, _dsn, as_float, load_matrix
 from fpl_modelling.train import load
 
 log = logging.getLogger(__name__)
@@ -54,28 +56,34 @@ OUTPUT_COLUMNS = (
 def load_prediction_frame(
     season: str,
     gameweek: int | None = None,
+    spec: MatrixSpec = PLAYER_MATRIX,
 ) -> pl.DataFrame:
     """Rows to score: fixtures that have not kicked off.
 
-    ``kickoff_utc >= now()`` is the filter, and it is the mirror of the one
-    load_training_set uses. Between them every row in the matrix is either
-    trainable or predictable and never both, which is the property that keeps
-    an outcome from being scored as if it were unknown.
+    The filter is the spec's unlabelled predicate, the mirror of the labelled
+    one the training path reads. Between them every row is either trainable or
+    predictable and never both, which is the property that keeps an outcome
+    from being scored as if it were unknown. Declaring the pair together in
+    MatrixSpec is what makes that checkable rather than a convention two files
+    happen to share.
+
+    The predicate is NOT universally ``kickoff_utc >= now()``. On the team
+    matrix it is ``not is_played``, because the undated 2025/26 fixtures have a
+    null kickoff and a null comparison is null rather than true — a fixture
+    that would be scored by neither path. Hardcoding the player predicate here
+    is what made that invisible.
 
     Without ``gameweek`` this returns every remaining fixture in the season.
     That is useful — a fixture-ticker endpoint wants six gameweeks ahead — but
     the far ones are predicted from features that will be stale by the time
     they are played, and the API should present them as such.
     """
-    where = [f"season = '{season}'", "kickoff_utc >= now()"]
-    if gameweek is not None:
-        where.append(f"gameweek = {gameweek}")
-
-    query = (
-        f"select * from {FEATURES_SCHEMA}.feat_training_set "
-        f"where {' and '.join(where)} order by gameweek, player_id"
+    df = load_matrix(
+        spec,
+        seasons=[season],
+        gameweeks=[gameweek] if gameweek is not None else None,
+        labelled=False,
     )
-    df = pl.read_database_uri(query=query, uri=_dsn())
     log.info(
         "prediction frame: %d rows, gameweeks %s",
         len(df),
@@ -183,9 +191,10 @@ def run(
     season: str,
     model_version: str,
     gameweek: int | None = None,
+    spec: MatrixSpec = PLAYER_MATRIX,
 ) -> int:
     """Score and persist. The whole serving path in one call."""
-    frame = load_prediction_frame(season=season, gameweek=gameweek)
+    frame = load_prediction_frame(season=season, gameweek=gameweek, spec=spec)
     return write(predict(frame, model_version))
 
 

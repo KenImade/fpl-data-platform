@@ -1,45 +1,33 @@
-"""Fitting the model that gets served, and recording enough to reproduce it.
+"""Fitting the minutes model that gets served, and recording enough to
+reproduce it.
 
 walk_forward_evaluate answers "is this model any good". This answers "which
 model is running, fitted on what, and can we rebuild it". Different questions,
 and conflating them is how a warehouse ends up serving numbers nobody can
 explain six months later.
 
-WHAT A VERSION IS. A model version names three things together: the code that
-fitted it, the data it saw, and the features it saw. Change any one and the
-predictions change, so all three go into the hash. The alternative — a
-monotonic counter, or a timestamp — tells you a model is different without
-telling you how, which is exactly the information you want when a prediction
-looks wrong.
+The versioning and storage that used to live here now live in artifacts.py,
+because none of it was ever specific to minutes. What remains is the part that
+is: which files define this model, how a booster becomes bytes, and the
+holdout arrangement the ordinal decomposition needs.
 
-WHAT IS PERSISTED. Two boosters, the feature list, the training bounds, and the
-walk-forward metrics that justified shipping it. The metrics travel with the
-artifact rather than living in a notebook, because "we thought it was better"
-is not a claim you can check later.
-
-THE ARTIFACT DOES NOT GO IN POSTGRES. Boosters are megabytes and immutable;
-object storage handles that and the database should not. What goes in Postgres
-is the version string on every prediction row, which is the pointer.
+THE METRICS TRAVEL WITH THE ARTIFACT rather than living in a notebook, because
+"we thought it was better" is not a claim you can check later.
 """
 
 from __future__ import annotations
 
-import hashlib
-import io
 import json
 import logging
-import os
-import tarfile
-import tempfile
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import Any
 
 import lightgbm as lgb
 import polars as pl
 
+from fpl_modelling import artifacts
 from fpl_modelling import minutes as minutes_model
+from fpl_modelling.artifacts import Manifest
 from fpl_modelling.data import (
     as_float,
     as_int,
@@ -50,160 +38,60 @@ from fpl_modelling.data import (
 
 log = logging.getLogger(__name__)
 
-ARTIFACT_PREFIX = "models/minutes"
+MODEL_NAME = "minutes"
+
+# The source files that define this model. artifacts.code_version raises if any
+# is missing, so a rename that is not reflected here fails at training time
+# rather than producing a version string that ignores the model.
+SOURCE_FILES = ("artifacts.py", "data.py", "minutes.py", "train.py")
+
+# Tar member names. Fixed rather than derived, because load must find them in
+# an artifact written by an older revision of this file.
+PLAYED_MEMBER = "played.txt"
+PLAYED_60_MEMBER = "played_60.txt"
 
 
-@dataclass(frozen=True)
-class TrainingManifest:
-    """Everything needed to say what this model is.
+def _serialise(model: minutes_model.MinutesModel) -> dict[str, bytes]:
+    """Two boosters as bytes.
 
-    Written alongside the boosters and read back at prediction time. The
-    feature list in particular is load-bearing: feat_player_form is generated
-    from a Jinja loop, so adding a window silently widens the matrix. A model
-    scored against a wider frame than it was fitted on must fail rather than
-    quietly reorder columns.
-    """
-
-    model_version: str
-    model_name: str
-    trained_at: str
-    seasons: list[str]
-    train_rows: int
-    train_gameweek_min: int
-    train_gameweek_max: int
-    features: list[str]
-    feature_count: int
-    params: dict[str, Any]
-    best_iterations: dict[str, int]
-    metrics: dict[str, float]
-    code_version: str
-
-
-def _code_version() -> str:
-    """Hash of the modelling source that produced this artifact.
-
-    Not the git SHA — the working tree may be dirty, and a model fitted from
-    uncommitted code is exactly the one you most need to identify. Hashing the
-    files that define the model catches that; a commit hash does not.
-    """
-    here = Path(__file__).parent
-    h = hashlib.sha256()
-    for name in sorted(("data.py", "minutes.py", "train.py")):
-        path = here / name
-        if path.exists():
-            h.update(path.read_bytes())
-    return h.hexdigest()[:12]
-
-
-def _data_version(df: pl.DataFrame, features: list[str]) -> str:
-    """Hash of what the model saw.
-
-    Row count, season and gameweek bounds, and the feature list. Not the data
-    itself — hashing 27k rows on every run is wasteful, and the warehouse is
-    rebuilt deterministically from immutable inputs anyway, so the bounds
-    identify it.
-
-    The feature list is included because a model fitted on the same rows with a
-    different feature set is a different model, and the row bounds alone would
-    call them identical.
-    """
-    payload = json.dumps(
-        {
-            "rows": len(df),
-            "seasons": sorted(df["season"].unique().to_list()),
-            "gw_min": as_int(df["gameweek"].min()),
-            "gw_max": as_int(df["gameweek"].max()),
-            "features": sorted(features),
-        },
-        sort_keys=True,
-    )
-    return hashlib.sha256(payload.encode()).hexdigest()[:12]
-
-
-def make_version(code: str, data: str) -> str:
-    """`minutes-<code>-<data>`. Readable, sortable enough, and diagnostic.
-
-    Given two versions you can see at a glance whether the code changed, the
-    data changed, or both — which is the first question when predictions move.
-    """
-    return f"minutes-{code}-{data}"
-
-
-def _store() -> Any:
-    """Object storage client.
-
-    S3-compatible, so MinIO locally and whatever the deployment uses in
-    production without a code change. Imported lazily because the training path
-    is useful without it — evaluation and inspection need no storage at all.
-    """
-    import boto3
-
-    return boto3.client(
-        "s3",
-        endpoint_url=os.environ.get("S3_ENDPOINT_URL", "http://localhost:9000"),
-        aws_access_key_id=os.environ.get("S3_ACCESS_KEY_ID", "minioadmin"),
-        aws_secret_access_key=os.environ.get("S3_SECRET_ACCESS_KEY", "minioadmin"),
-    )
-
-
-def _bucket() -> str:
-    return os.environ.get("MODEL_BUCKET", "fpl-models")
-
-
-def save(model: minutes_model.MinutesModel, manifest: TrainingManifest) -> str:
-    """Write the artifact to object storage, return its key.
-
-    One tarball rather than several objects: the boosters and the manifest are
-    only meaningful together, and a partial read that returns a model without
-    its feature list is worse than a failed read.
+    model_to_string rather than save_model, so no temporary directory is
+    involved and the artifact layer never sees a path.
     """
     if model.played is None or model.played_60 is None:
         # Saving an unfitted model would write a well-formed artifact that
         # fails only when something tries to predict with it.
         raise RuntimeError("cannot save an unfitted model")
 
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp_path = Path(tmp)
-        model.played.save_model(str(tmp_path / "played.txt"))
-        model.played_60.save_model(str(tmp_path / "played_60.txt"))
-        (tmp_path / "manifest.json").write_text(json.dumps(asdict(manifest), indent=2))
-
-        buf = io.BytesIO()
-        with tarfile.open(fileobj=buf, mode="w:gz") as tar:
-            for name in ("played.txt", "played_60.txt", "manifest.json"):
-                tar.add(tmp_path / name, arcname=name)
-        buf.seek(0)
-
-        key = f"{ARTIFACT_PREFIX}/{manifest.model_version}.tar.gz"
-        _store().put_object(Bucket=_bucket(), Key=key, Body=buf.getvalue())
-
-    log.info("saved %s (%d features)", key, manifest.feature_count)
-    return key
+    return {
+        PLAYED_MEMBER: model.played.model_to_string().encode(),
+        PLAYED_60_MEMBER: model.played_60.model_to_string().encode(),
+    }
 
 
-def load(model_version: str) -> tuple[minutes_model.MinutesModel, TrainingManifest]:
-    """Read an artifact back.
+def save(model: minutes_model.MinutesModel, manifest: Manifest) -> str:
+    """Write the artifact, return its key."""
+    return artifacts.save(manifest, _serialise(model))
 
-    The prediction path calls this rather than refitting. A prediction that
-    retrains is not reproducible and is also slow at exactly the moment it
-    needs not to be.
+
+def load(model_version: str) -> tuple[minutes_model.MinutesModel, Manifest]:
+    """Read an artifact back as a fitted model.
+
+    The feature list comes from the manifest rather than being recomputed, so a
+    matrix that has gained columns since training fails in predict_cumulative
+    rather than being silently reordered.
     """
-    key = f"{ARTIFACT_PREFIX}/{model_version}.tar.gz"
-    obj = _store().get_object(Bucket=_bucket(), Key=key)
-    buf = io.BytesIO(obj["Body"].read())
+    members, manifest = artifacts.load(MODEL_NAME, model_version)
 
-    with tarfile.open(fileobj=buf, mode="r:gz") as tar, tempfile.TemporaryDirectory() as tmp:
-        tar.extractall(tmp, filter="data")
-        tmp_path = Path(tmp)
-        manifest = TrainingManifest(**json.loads((tmp_path / "manifest.json").read_text()))
-        model = minutes_model.MinutesModel(
-            features=manifest.features,
-            played=lgb.Booster(model_file=str(tmp_path / "played.txt")),
-            played_60=lgb.Booster(model_file=str(tmp_path / "played_60.txt")),
-            best_iterations=manifest.best_iterations,
-        )
+    missing = [m for m in (PLAYED_MEMBER, PLAYED_60_MEMBER) if m not in members]
+    if missing:
+        raise ValueError(f"{model_version}: artifact is missing {missing}")
 
-    log.info("loaded %s trained %s", model_version, manifest.trained_at)
+    model = minutes_model.MinutesModel(
+        features=manifest.features,
+        played=lgb.Booster(model_str=members[PLAYED_MEMBER].decode()),
+        played_60=lgb.Booster(model_str=members[PLAYED_60_MEMBER].decode()),
+        best_iterations=manifest.extras.get("best_iterations", {}),
+    )
     return model, manifest
 
 
@@ -212,7 +100,7 @@ def train(
     holdout_gameweeks: int = 2,
     evaluate: bool = True,
     persist: bool = True,
-) -> tuple[minutes_model.MinutesModel, TrainingManifest]:
+) -> tuple[minutes_model.MinutesModel, Manifest]:
     """Fit on everything available, after checking it is worth shipping.
 
     ``evaluate`` runs the full walk-forward before fitting the final model. It
@@ -283,9 +171,12 @@ def train(
 
     model = minutes_model.fit(fit_df, features=features, valid=valid_df)
 
-    manifest = TrainingManifest(
-        model_version=make_version(_code_version(), _data_version(df, features)),
-        model_name="minutes_ordinal",
+    code = artifacts.code_version(SOURCE_FILES)
+    data = artifacts.data_version(df, features)
+
+    manifest = Manifest(
+        model_name=MODEL_NAME,
+        model_version=artifacts.make_version(MODEL_NAME, code, data),
         trained_at=datetime.now(UTC).isoformat(),
         seasons=sorted(df["season"].unique().to_list()),
         train_rows=len(df),
@@ -294,9 +185,14 @@ def train(
         features=features,
         feature_count=len(features),
         params=dict(minutes_model.PARAMS),
-        best_iterations=model.best_iterations,
         metrics=metrics,
-        code_version=_code_version(),
+        code_version=code,
+        data_version=data,
+        extras={
+            "formulation": "ordinal_decomposition",
+            "best_iterations": model.best_iterations,
+            "holdout_gameweeks": holdout_gameweeks,
+        },
     )
 
     if persist:

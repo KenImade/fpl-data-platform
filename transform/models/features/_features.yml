@@ -521,3 +521,272 @@ models:
           unavailable for these rows, not merely null — any model training
           across both paths must carry this or drop those columns.
         tests: [not_null]
+  - name: feat_team_strength
+    description: >
+      Attacking and defensive strength, as at each deadline. One row per club
+      per gameweek, for every club in the season — not only those with a
+      fixture.
+
+      ELO IS THE BACKBONE. fct_team_fixture carries the rating AT KICKOFF, so
+      it is point-in-time by construction and is the only feature here free of
+      the leakage question entirely. It also solves the promoted-club problem:
+      a newly promoted side has no Premier League history but does have an
+      Elo, so it starts from a defensible prior rather than a null.
+
+      LEAGUE ONLY, for the same reason feat_player_form is. A Champions League
+      goal against a weaker opponent is not evidence of Premier League
+      attacking strength. All-competition load lives in feat_player_load.
+
+      xG is summed from player rows, since fct_team_fixture carries goals but
+      not xG. A team's xG is the sum of its players', which holds because
+      fct_player_gw is at fixture grain. It inherits that model's end-of-season
+      club assignment for mid-season transfers — immaterial at team aggregate
+      level, since the player's xG lands at one of the two clubs in the
+      fixture either way.
+
+      UNDATED FIXTURES ARE EXCLUDED FROM THE WINDOWS. Nulls are peers in a
+      RANGE frame, so an undated fixture falls inside every other fixture's
+      window. 2025/26 GW34-38 have no kickoff time. Their goals are still real
+      labels — see feat_team_fixture_spine, which keeps them — but they cannot
+      contribute to a rolling rate.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [snapshot_id, team_code]
+    columns:
+      - name: snapshot_id
+        description: >
+          The deadline these rates are known as at. Taken from
+          feat_player_gameweek_spine rather than fct_deadline_snapshot, so the
+          key space spans both the live and reconstructed paths.
+        tests: [not_null]
+      - name: team_code
+        description: >
+          Stable across seasons, unlike team_id. Every club in the season
+          appears at every deadline, via dim_team.
+        tests: [not_null]
+      - name: elo_current
+        description: >
+          Elo at the club's most recent league fixture before this deadline.
+          NULL only at a genuine cold start — GW1, before any league fixture
+          has been played.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1200
+                max_value: 2200
+                config:
+                  where: "elo_current is not null"
+      - name: xg_against_per_match_5
+        description: >
+          The primary defensive-strength feature, and the one the team
+          defence model leans on hardest after Elo. xG rather than goals
+          because the sample is five matches and goals at that sample size
+          are mostly noise.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 5
+                config:
+                  where: "xg_against_per_match_5 is not null"
+                  severity: warn
+      - name: xg_for_per_match_5
+        description: >
+          The opponent side of the same coin. Joined as the attack a club is
+          about to face.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 5
+                config:
+                  where: "xg_for_per_match_5 is not null"
+                  severity: warn
+      - name: clean_sheet_rate_10
+        description: >
+          Observed clean sheet rate over the last 10 league fixtures. Carried
+          as the naive baseline for the team defence model to beat, not as a
+          feature it should lean on — 10 matches gives a standard error of
+          roughly 0.14 on a rate near the league average of 0.28.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+                config:
+                  where: "clean_sheet_rate_10 is not null"
+      - name: matches_season
+        description: >
+          League fixtures played before this deadline. The denominator behind
+          every rate here, and what is_cold_start is derived from.
+      - name: is_cold_start
+        description: >
+          No league fixtures at all as at this deadline. Every rolling rate is
+          NULL on these rows and only Elo and the FPL strength ratings carry
+          signal. An explicit flag rather than leaving a model to infer it
+          from a wall of nulls.
+        tests: [not_null]
+      - name: strength_defence_home
+        description: >
+          FPL's own rating, carried for comparison against ep_next rather than
+          as a modelling input. Crude next to Elo and updated infrequently.
+
+  - name: feat_team_fixture_spine
+    description: >
+      Every league fixture a club could play, with the strength features known
+      at that gameweek's deadline and the conceded label where one exists. Two
+      rows per fixture, one per club.
+
+      THE PREDICTION MATRIX AND THE SOURCE OF THE TRAINING SET. Unplayed
+      fixtures stay, with goals_against NULL and is_played false. Filtering to
+      played rows here would force a second near-identical model to score
+      against, with the feature logic duplicated across both — the drift risk
+      that keeps feat_player_fixture_spine and feat_training_set separate.
+
+      ONE SPINE, NOT TWO. The player layer needs a live and a reconstructed
+      path because rosters come from captures. Nothing here does: the fixture
+      list and Elo come from fct_team_fixture, the rolling rates from
+      feat_team_strength, and both span every season. Deadlines come from
+      feat_player_gameweek_spine rather than fct_deadline_snapshot — the
+      latter has no rows before captures begin, which would leave this model
+      empty of labels in the only season that has them.
+
+      UNDATED FIXTURES ARE KEPT. 2025/26 GW34-38 have no kickoff time, so
+      feat_team_strength excludes them from its windows. Their gameweek is
+      known, so they still join to a deadline and their goals are still real
+      labels — roughly 100 rows of about 760 in the only labelled season, too
+      many to discard. Congestion is NULL for them and has_congestion says so.
+
+      This is the smallest matrix in the project by two orders of magnitude:
+      about 760 rows per completed season. That constraint is the reason the
+      defence model is a regularised GLM rather than a GBM.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [snapshot_id, team_code, match_id]
+    columns:
+      - name: snapshot_id
+        tests: [not_null]
+      - name: team_code
+        description: The club conceding. Features prefixed own_ describe it.
+        tests: [not_null]
+      - name: opponent_code
+        description: >
+          The club attacking. Features prefixed opp_ describe it, joined to
+          feat_team_strength on this column. If opp_xg_for_5 correlates
+          negatively with goals_against, the two joins have been swapped —
+          an inversion that produces no error.
+        tests: [not_null]
+      - name: match_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_matches')
+                field: match_id
+      - name: is_home
+        tests: [not_null]
+      - name: elo_diff
+        description: >
+          Own Elo minus opponent's, at kickoff. Positive means the stronger
+          side, so it should correlate NEGATIVELY with goals_against.
+      - name: is_played
+        description: >
+          Derived from result rather than from goals_against, matching
+          feat_team_strength. Both are proxies for a status field the source
+          does not provide, but result's nullability is one documented
+          decision in fct_team_fixture rather than an incidental property of
+          a label column. Every label below is NULL where this is false.
+        tests: [not_null]
+      - name: goals_against
+        description: >
+          THE PRIMARY LABEL. The team defence model fits a rate to this, and
+          every defensive component falls out of the resulting distribution:
+          P(0) is the clean sheet, E[floor(k/2)] the concession penalty.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 10
+                config:
+                  where: "is_played"
+      - name: is_clean_sheet
+        description: >
+          goals_against = 0. NULL on unplayed fixtures. Expect roughly 0.28
+          across a season; a materially different rate means the league
+          filter or the home/away unpivot has gone wrong.
+      - name: team_saves
+        description: >
+          Summed across all players rather than filtered to keepers, so an
+          outfield player credited with a save still counts. The saves model's
+          target.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 20
+                config:
+                  where: "team_saves is not null"
+      - name: shots_on_target_faced
+        description: >
+          The opponent's shots on target in this fixture, summed from player
+          rows. The volume driver behind saves, and the denominator that
+          separates a busy keeper from a good one.
+      - name: has_congestion
+        description: >
+          False where the fixture has no kickoff time, making matches_prior_14d
+          and days_rest NULL. Zero rest days and unknown rest days are opposite
+          signals, so these are emitted NULL with a flag rather than coalesced.
+          Any model consuming them must impute explicitly and carry this
+          alongside.
+        tests: [not_null]
+      - name: own_is_cold_start
+        description: >
+          Inherited from feat_team_strength. True at GW1, where only Elo
+          carries signal. These rows are scored but not trained on.
+        tests: [not_null]
+
+  - name: feat_team_defence_training_set
+    description: >
+      The labelled subset of feat_team_fixture_spine, materialised as a view.
+
+      Deliberately thin. Every feature is defined once, in the spine, and this
+      model's only job is to make "labelled" a visible subset rather than a
+      coincidence of nullability. Predictions score against the spine, training
+      reads this, and neither can drift because there is nothing here to drift.
+
+      THE ONE ADDED FILTER beyond is_played is the cold-start exclusion. A club
+      at its first deadline of a season has no rolling xG, so every rate
+      feature is null and the row contributes an imputation artefact rather
+      than a signal. Elo still covers those fixtures at prediction time.
+
+      Expect roughly 700 rows per completed season after both filters. A count
+      materially above 760 means the unpivot is duplicating; well below 700
+      means the cold-start filter is catching more than the opening gameweek.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [snapshot_id, team_code, match_id]
+    columns:
+      - name: snapshot_id
+        tests: [not_null]
+      - name: team_code
+        tests: [not_null]
+      - name: match_id
+        tests: [not_null]
+      - name: goals_against
+        description: >
+          Never NULL here, unlike on the spine. That difference is the whole
+          point of the model.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 10
+      - name: is_clean_sheet
+        tests: [not_null]
+      - name: is_played
+        description: Always true. Retained so the spine and this share a shape.
+        tests: [not_null]

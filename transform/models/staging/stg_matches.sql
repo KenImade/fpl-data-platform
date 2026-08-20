@@ -54,11 +54,6 @@ renamed as (
         _ingested_at                                as ingested_at
 
     from deduped where _rn = 1
-    -- Upstream data quality: knockout fixtures appear as placeholder rows before
-    -- they're scheduled, and at least one (25-26-conference-league-aek-larnaca-
-    -- vs-crystal-palace, GW30) was populated with another fixture's kickoff and
-    -- score, duplicating a real GW8 row. Keeping the lowest gameweek picks the
-    -- genuine fixture. The unique test below catches the next occurrence.
 )
 
 select * from renamed
